@@ -6,7 +6,6 @@ save_dir/
 .vscode/
 __pycache__/
 
-*.json
 *.ply
 data_splits/
 *.pkl
