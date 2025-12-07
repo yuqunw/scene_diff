@@ -1,0 +1,13 @@
+cyws-3d.ckpt
+output/
+vis_figures/
+save_dir/
+*.png
+.vscode/
+__pycache__/
+
+*.json
+*.ply
+data_splits/
+*.pkl
+eval_list_dir/

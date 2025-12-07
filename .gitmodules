@@ -1,0 +1,9 @@
+[submodule "Pi3"]
+	path = submodules/Pi3
+	url = https://github.com/yyfz/Pi3
+[submodule "submodules/segment-anything-langsplat-modified"]
+	path = submodules/segment-anything-langsplat-modified
+	url = https://github.com/yuqunw/segment-anything-langsplat-modified
+[submodule "submodules/dinov3"]
+	path = submodules/dinov3
+	url = https://github.com/facebookresearch/dinov3
