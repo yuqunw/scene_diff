@@ -39,7 +39,7 @@
 
 <br />
 
-This repository contains the code for the paper [SceneDiff: A Benchmark and Method for Multiview Object Change Detection](http://yuqunw.github.io/SceneDiff). We investigate the problem of identifying objects that have been changed between a pair of captures of the same scene at different times, introducing the first multiview change detection benchmark and a new training-free method.
+This repository contains the code for the paper [SceneDiff: A Benchmark and Method for Multiview Object Change Detection](http://yuqunw.github.io/SceneDiff). We investigate the problem of identifying objects that have been changed between a pair of captures of the same scene at different times, introducing the first object-level multiview change detection benchmark and a new training-free method.
 
 ## SceneDiff Benchmark
 
@@ -84,20 +84,24 @@ object_masks = {
     'H': int,                           # Image height
     'W': int,                           # Image width
     'video_1': {                        # Objects existing in video_1
-        'object_id': {                  # Integer ID for each detected object
-            'frame_id': {               # Integer frame number
+        'object_id_1': {                # Integer ID for each detected object
+            'frame_id_1': {             # Integer frame number
                 'mask': RLE_Mask,       # Run-length encoded mask
                 'cost': float           # Confidence score of the prediction
-            }
+            },
+            ...
         },
+        ...
     },
     'video_2': {                        # Objects existing in video_2
-        'object_id': {                  # Integer ID for each detected object
-            'frame_id': {               # Integer frame number
+        'object_id_1': {                # Integer ID for each detected object
+            'frame_id_1': {             # Integer frame number
                 'mask': RLE_Mask,       # Run-length encoded mask
                 'cost': float           # Confidence score of the prediction
-            }
+            },
+            ...
         },
+        ...
     }
 }
 ```
@@ -106,15 +110,22 @@ Then the evaluation script can be run with:
 ```bash
 python scripts/evaluate_multiview.py \
     --pred_dir ${OUTPUT_DIR} \
-    --duplicate_match_threshold 2 \              # Tolerance for duplicate objects across frames
-    --per_frame_duplicate_match_threshold 2 \    # Tolerance for duplicate regions per frame
-    --splits val \                               # Choose from: val, test, all
-    --sets Diverse                               # Choose from: Diverse, Kitchen, All
-    --output_dir ${OUTPUT_DIR} \
-    --output_name ${OUTPUT_NAME} \
-    --visualize False \
+    --duplicate_match_threshold 2 \
+    --per_frame_duplicate_match_threshold 2 \
+    --splits val \
+    --sets Diverse \
+    --output_path ${OUTPUT_FILE_PATH} \
+    --visualize False
 ```
-The evaluation result would then be stored at `${OUTPUT_DIR}/${OUTPUT_NAME}.txt`
+
+**Arguments:**
+- `--duplicate_match_threshold`: Tolerance for duplicate objects across frames (default: 2)
+- `--per_frame_duplicate_match_threshold`: Tolerance for duplicate regions per frame (default: 2)
+- `--splits`: Choose from `val`, `test`, or `all`
+- `--sets`: Choose from `Diverse`, `Kitchen`, or `All`
+- `--visualize`: Set to `True` to save visualization outputs
+
+**Output:** The evaluation results will be saved to `${OUTPUT_FILE_PATH}`
 ## Getting Started
 
 ### Installation
@@ -127,9 +138,11 @@ The evaluation result would then be stored at `${OUTPUT_DIR}/${OUTPUT_NAME}.txt`
 
 2. **Create conda environment and install dependencies:**
     ```bash
-    conda create -n scenediff python=3.10
+    conda create -n scenediff python=3.10 -y
     conda activate scenediff
+    pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121 # Install the pytorch fitting your nvcc version 
     pip install -r requirements.txt
+    pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu121.html # install torch_scatter
     ```
 
 3. **Install submodules:**

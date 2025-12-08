@@ -47,7 +47,7 @@ detection:
   min_detection_pixel: 100 # Minimum number of pixels for detection
   threshold_method: "max_entropy"  # Options: "otsu", "max_entropy"
   change_region_threshold: null  # null for auto, or specify a float
-  filter_percentage_before_threshold: 0.5 # Percentage of pixels to filter before thresholding
+  filter_percentage_before_threshold: 0 # Percentage of pixels to filter before thresholding
   max_score: 0.5 # Maximum score for detection
   max_detected_objects: 1000 # Maximum number of objects to detect
 

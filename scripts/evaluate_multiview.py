@@ -18,6 +18,9 @@ import json
 import pickle
 import copy
 from pathlib import Path
+import sys
+# Add parent directory to path for module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import cv2
@@ -663,9 +666,9 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         visualize: Whether to generate visualizations
     """
     # Initialize tracking variables
-    all_detections_info = []
-    total_gt_count = 0
+    total_gt_regions_count = 0
     total_gt_objects_count = {}
+    all_region_detections_info = []
     all_object_level_detection_info = []
     all_object_level_detection_info_by_label = []
     
@@ -691,23 +694,39 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         H, W = pred_data.get('H', 480), pred_data.get('W', 640)
         
         # Extract ground truth
-        scene_gt_objects, scene_gt_labels = extract_ground_truth(
+        scene_gt_objects, scene_gt_labels, scene_gt_objects_by_label = extract_ground_truth(
             gt_data, H, W, args.resample_rate
         )
-        total_gt_count += len(scene_gt_objects)
-        
-        # Update GT object counts
-        for label in scene_gt_labels.values():
-            total_gt_objects_count[scene_name][label] += 1
+        total_gt_regions_count += len(scene_gt_objects)
+        total_gt_objects_count[scene_name][0] += scene_gt_objects_by_label[0]
+        total_gt_objects_count[scene_name][1] += scene_gt_objects_by_label[1]
         
         # Extract detections
-        scene_detections = extract_detections(pred_data, H, W)
+        scene_region_detections = extract_detections(pred_data, H, W)
+        
+        pred_data = {k: v for k, v in pred_data.items() if k not in ['H', 'W']}
+        # Add labels and confidence to prediction objects
+        for obj_k, obj_v in pred_data.items():
+            if obj_k in ['H', 'W']:
+                pred_data.pop(obj_k)
+                continue
+            
+            # Determine label
+            if 'video_1' in obj_v and 'video_2' in obj_v:
+                pred_data[obj_k]['label'] = 1  # Moved
+            elif 'video_1' in obj_v or 'video_2' in obj_v:
+                pred_data[obj_k]['label'] = 0  # Non-moved
+            else:
+                continue
+            
+            # Compute confidence
+            pred_data[obj_k]['confidence'] = compute_object_confidence(obj_v)
         
         # Match detections to ground truth (per-view)
         scene_gt_matched = {k: False for k in scene_gt_objects.keys()}
         match_detections_to_gt(
-            scene_detections, scene_gt_objects, scene_gt_labels,
-            scene_gt_matched, all_detections_info, scene_name, args
+            scene_region_detections, scene_gt_objects, scene_gt_labels,
+            scene_gt_matched, all_region_detections_info, scene_name, args
         )
         
         # Object-level evaluation
@@ -731,7 +750,7 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     
     # Compute metrics
     metrics = compute_final_metrics(
-        all_detections_info, total_gt_count,
+        all_region_detections_info, total_gt_regions_count,
         all_object_level_detection_info, all_object_level_detection_info_by_label,
         total_gt_objects_count, valid_scene_names
     )
@@ -761,7 +780,8 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
     Extract ground truth objects from dataset.
     
     Returns:
-        Tuple of (scene_gt_objects, scene_gt_labels)
+        scene_gt_objects: key: (obj_id, frame_idx, video), value: bbox
+        scene_gt_labels: key: (obj_id, frame_idx, video), value: label
     """
     gt_video_1_objects = gt_data['video1_objects']
     gt_video_2_objects = gt_data['video2_objects']
@@ -769,6 +789,7 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
     
     scene_gt_objects = {}
     scene_gt_labels = {}
+    scene_gt_objects_by_label = {0: 0, 1: 0}
     
     for object_info in gt_meta:
         obj_k = object_info['original_obj_idx']
@@ -782,6 +803,8 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
             label = 0  # Non-moved (added or removed)
         else:
             continue
+        
+        scene_gt_objects_by_label[label] += 1
         
         # Process video 1
         if in_video1 and obj_k in gt_video_1_objects:
@@ -809,7 +832,7 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
                     scene_gt_objects[key] = gt_bbox
                     scene_gt_labels[key] = label
     
-    return scene_gt_objects, scene_gt_labels
+    return scene_gt_objects, scene_gt_labels, scene_gt_objects_by_label
 
 
 def decode_and_resize_mask(mask_rle, H, W):
@@ -824,7 +847,7 @@ def decode_and_resize_mask(mask_rle, H, W):
 
 def extract_detections(pred_data, H, W):
     """Extract detection list from prediction data."""
-    scene_detections = []
+    scene_region_detections = []
     
     for obj_k, obj_v in pred_data.items():
         if obj_k in ['H', 'W']:
@@ -837,7 +860,7 @@ def extract_detections(pred_data, H, W):
                 det_mask = torch.tensor(mask_utils.decode(mask_dict['mask']))
                 det_center = get_mask_bbox_center_point(det_mask)
                 
-                scene_detections.append({
+                scene_region_detections.append({
                     'obj_id': obj_k,
                     'frame_idx': frame_index,
                     'video': 1,
@@ -853,7 +876,7 @@ def extract_detections(pred_data, H, W):
                 det_mask = torch.tensor(mask_utils.decode(mask_dict['mask']))
                 det_center = get_mask_bbox_center_point(det_mask)
                 
-                scene_detections.append({
+                scene_region_detections.append({
                     'obj_id': obj_k,
                     'frame_idx': frame_index,
                     'video': 2,
@@ -863,13 +886,13 @@ def extract_detections(pred_data, H, W):
                 })
     
     # Sort by confidence
-    return sorted(scene_detections, key=lambda x: x['confidence'], reverse=True)
+    return sorted(scene_region_detections, key=lambda x: x['confidence'], reverse=True)
 
 
-def match_detections_to_gt(scene_detections, scene_gt_objects, scene_gt_labels,
-                           scene_gt_matched, all_detections_info, scene_name, args):
+def match_detections_to_gt(scene_region_detections, scene_gt_objects, scene_gt_labels,
+                           scene_gt_matched, all_region_detections_info, scene_name, args):
     """Match detections to ground truth objects for per-view AP."""
-    for detection in scene_detections:
+    for detection in scene_region_detections:
         frame_idx = detection['frame_idx']
         video = detection['video']
         det_center = detection['pred_center']
@@ -907,14 +930,14 @@ def match_detections_to_gt(scene_detections, scene_gt_objects, scene_gt_labels,
                 detection_info['gt_label'] = scene_gt_labels[best_gt_key]
                 detection_info['gt_obj_id'] = best_gt_key[0]
                 scene_gt_matched[best_gt_key] = True
-                all_detections_info.append(detection_info)
+                all_region_detections_info.append(detection_info)
             elif scene_gt_matched[best_gt_key] < args.per_frame_duplicate_match_threshold:
                 scene_gt_matched[best_gt_key] += 1
                 detection_info['gt_matched'] = True
                 detection_info['gt_label'] = scene_gt_labels[best_gt_key]
                 detection_info['gt_obj_id'] = best_gt_key[0]
         else:
-            all_detections_info.append(detection_info)
+            all_region_detections_info.append(detection_info)
 
 
 def evaluate_object_level(pred_data, gt_data, scene_gt_objects, scene_gt_labels,
@@ -1064,16 +1087,7 @@ def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_
 def evaluate_class_aware(pred_objects, gt_objects, all_detection_info, scene_name, args):
     """Evaluate class-aware object-level AP."""
     scene_gt_matched = {}
-    
-    # Add labels if not present
-    for obj_k, obj_v in pred_objects.items():
-        if 'label' not in obj_v:
-            if 'video_1' in obj_v and 'video_2' in obj_v:
-                obj_v['label'] = 1
-            else:
-                obj_v['label'] = 0
-            obj_v['confidence'] = compute_object_confidence(obj_v)
-    
+
     pred_sorted = sorted(pred_objects.items(), key=lambda x: x[1]['confidence'], reverse=True)
     
     for obj_k, obj_v in pred_sorted:
@@ -1245,19 +1259,19 @@ def match_moved_object_to_gt(obj_v, frame_1, frame_2, gt_objects):
     return matched_gt_id
 
 
-def compute_final_metrics(all_detections_info, total_gt_count,
+def compute_final_metrics(all_region_detections_info, total_gt_regions_count,
                          all_object_level_detection_info,
                          all_object_level_detection_info_by_label,
                          total_gt_objects_count, valid_scene_names):
     """Compute final AP metrics."""
     # Per-view AP
-    all_detections_info = sorted(all_detections_info, key=lambda x: x['confidence'], reverse=True)
-    tp = np.array([1 if d['gt_matched'] else 0 for d in all_detections_info])
-    fp = np.array([0 if d['gt_matched'] else 1 for d in all_detections_info])
+    all_region_detections_info = sorted(all_region_detections_info, key=lambda x: x['confidence'], reverse=True)
+    tp = np.array([1 if d['gt_matched'] else 0 for d in all_region_detections_info])
+    fp = np.array([0 if d['gt_matched'] else 1 for d in all_region_detections_info])
     
     tp_cumsum = np.cumsum(tp)
     fp_cumsum = np.cumsum(fp)
-    recalls = tp_cumsum / total_gt_count if total_gt_count > 0 else np.zeros_like(tp_cumsum)
+    recalls = tp_cumsum / total_gt_regions_count if total_gt_regions_count > 0 else np.zeros_like(tp_cumsum)
     precisions = tp_cumsum / (tp_cumsum + fp_cumsum) if len(tp_cumsum) > 0 else np.zeros_like(tp_cumsum)
     per_view_ap = calculate_voc_ap(recalls, precisions)
     
@@ -1339,14 +1353,12 @@ def main():
     parser.add_argument('--pred_dir', type=str, default='output',
                        help='Directory containing prediction outputs')
     parser.add_argument('--gt_dir', type=str, 
-                       default='/work/nvme/bcqn/ywu20/scene_change/final_data/results_valid',
+                       default='data/scenediff_benchmark',
                        help='Directory containing ground truth data')
     parser.add_argument('--video_dir', type=str,
-                       default='/work/nvme/bcqn/ywu20/scene_change/final_data/results_valid',
+                       default='data/scenediff_benchmark',
                        help='Directory containing video files')
-    parser.add_argument('--output_dir', type=str, default='output',
-                       help='Output directory for results')
-    parser.add_argument('--output_name', type=str, default='result.txt',
+    parser.add_argument('--output_path', type=str, default='output/result.txt',
                        help='Output filename')
     parser.add_argument('--back_string', type=str, default=None,
                        help='Suffix for prediction directory names')
@@ -1428,11 +1440,7 @@ def main():
     print(f"Not predicted: {len(not_predicted)} scenes")
     
     # Evaluate all scenes
-    save_result_path = os.path.join(
-        args.output_dir,
-        args.output_name.replace('.txt', 
-            f'_point_iou{args.iou_threshold}_perframe{args.per_frame_duplicate_match_threshold}_obj{args.duplicate_match_threshold}.txt')
-    )
+    save_result_path = args.output_path.replace('.txt', f'perframe{args.per_frame_duplicate_match_threshold}_obj{args.duplicate_match_threshold}.txt')
     
     evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=args.visualize)
     

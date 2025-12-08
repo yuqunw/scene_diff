@@ -1,6 +1,5 @@
 faiss-cpu
 open3d
-torch-scatter
 opencv-python
 pycocotools
 matplotlib
@@ -11,11 +10,8 @@ Pillow
 huggingface_hub
 einops
 safetensors
-torch==2.5.1
-torchvision==0.20.1
-torchaudio==2.5.1
-# Set FORCE_CUDA=1 for pytorch3d 
-"git+https://github.com/facebookresearch/pytorch3d.git"
+torchmetrics
+termcolor
 scikit-image
 pyyaml  # For configuration file parsing
 pillow
