@@ -69,7 +69,52 @@ The dataset is divided into validation and test splits, stored in the `splits/` 
 - `splits/val_split.json` - Validation set with subsets: `Diverse`, `Kitchen`
 - `splits/test_split.json` - Test set with subsets: `Diverse`, `Kitchen`
 
+### Evaluation
+We expect the method predictions have following structures:
+```
+output_dir/
+├── sequence_pair_1/
+│   └── object_masks.pkl           # Dense segmentations of changed objects (for evaluation)
+├── sequence_pair_2/
+└── ...
+```
+with `object_masks.pkl` following this structure:
+```python
+object_masks = {
+    'H': int,                           # Image height
+    'W': int,                           # Image width
+    'video_1': {                        # Objects existing in video_1
+        'object_id': {                  # Integer ID for each detected object
+            'frame_id': {               # Integer frame number
+                'mask': RLE_Mask,       # Run-length encoded mask
+                'cost': float           # Confidence score of the prediction
+            }
+        },
+    },
+    'video_2': {                        # Objects existing in video_2
+        'object_id': {                  # Integer ID for each detected object
+            'frame_id': {               # Integer frame number
+                'mask': RLE_Mask,       # Run-length encoded mask
+                'cost': float           # Confidence score of the prediction
+            }
+        },
+    }
+}
+```
+Then the evaluation script can be run with:
 
+```bash
+python scripts/evaluate_multiview.py \
+    --pred_dir ${OUTPUT_DIR} \
+    --duplicate_match_threshold 2 \              # Tolerance for duplicate objects across frames
+    --per_frame_duplicate_match_threshold 2 \    # Tolerance for duplicate regions per frame
+    --splits val \                               # Choose from: val, test, all
+    --sets Diverse                               # Choose from: Diverse, Kitchen, All
+    --output_dir ${OUTPUT_DIR} \
+    --output_name ${OUTPUT_NAME} \
+    --visualize False \
+```
+The evaluation result would then be stored at `${OUTPUT_DIR}/${OUTPUT_NAME}.txt`
 ## Getting Started
 
 ### Installation
@@ -121,9 +166,8 @@ python scripts/demo.py \
 **Parameters:** You can modify parameters in `configs/scenediff_config.yml`. If the automatic threshold for change detection doesn't work well (score maps look correct but too many or few detections), you can manually set `detection.object_threshold` in the config file.   
 
 
-## Evaluation
 
-### Predict on SceneDiff Benchmark
+## Predict on SceneDiff Benchmark
 
 Run inference on all sequences in the benchmark:
 
@@ -141,46 +185,8 @@ python scripts/predict_multiview.py \
 - `--output_dir`: Directory to save predictions
 - Modify more arguments in the config file
 
-The output used for evaluation is `object_masks.pkl`, following this structure:
-```python
-object_masks = {
-    'H': int,                           # Image height
-    'W': int,                           # Image width
-    'video_1': {                        # Objects existing in video_1
-        'object_id': {                  # Integer ID for each detected object
-            'frame_id': {               # Integer frame number
-                'mask': RLE_Mask,       # Run-length encoded mask
-                'cost': float           # Confidence score of the prediction
-            }
-        },
-    },
-    'video_2': {                        # Objects existing in video_2
-        'object_id': {                  # Integer ID for each detected object
-            'frame_id': {               # Integer frame number
-                'mask': RLE_Mask,       # Run-length encoded mask
-                'cost': float           # Confidence score of the prediction
-            }
-        },
-    }
-}
-```
 
 
-### Run Evaluation
-
-Evaluate predictions against ground truth:
-
-```bash
-python scripts/evaluate_multiview.py \
-    --pred_dir output/scenediff_benchmark \
-    --duplicate_match_threshold 2 \              # Tolerance for duplicate objects across frames
-    --per_frame_duplicate_match_threshold 2 \    # Tolerance for duplicate regions per frame
-    --splits val \                               # Choose from: val, test, all
-    --sets Diverse                               # Choose from: Diverse, Kitchen, All
-    --output_dir output \
-    --output_name diverse_val_results \
-    --visualize False \
-```
 
 
 
