@@ -897,9 +897,7 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
         sam_mask_2_merged: Segmentation mask for image 2 (H, W)
         valid_mask_1: Valid mask for image 1 (H, W)
         valid_mask_2: Valid mask for image 2 (H, W)
-        foreground_dis_1: Foreground distance for image 1 (H, W)
-        foreground_dis_2: Foreground distance for image 2 (H, W)
-        
+
     Returns:
         Tuple of (cost_1, cost_2, match_indices_1, match_indices_2, sim_1, sim_2)
     """
@@ -940,22 +938,19 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
         if mask_idx == -1:
             continue
         mask_i = sam_mask_1_merged == mask_idx
-        if (mask_i & valid_mask_1).float().sum() > (mask_i.float().sum() * occlusion_threshold):
-            dinov1_region_match_cost_1[mask_i] = 1 - dinov1_region_match_sim_1[mask_idx]
-        else:
+        if (~valid_mask_1[mask_i]).float().mean() > occlusion_threshold:
             dinov1_region_match_cost_1[mask_i] = 0
+        else:
+            dinov1_region_match_cost_1[mask_i] = 1 - dinov1_region_match_sim_1[mask_idx]
 
     for mask_idx in sam_mask_2_merged.unique():
         if mask_idx == -1:
             continue
         mask_i = sam_mask_2_merged == mask_idx
-        if (mask_i & valid_mask_2).float().sum() > (mask_i.float().sum() * occlusion_threshold):
-            dinov1_region_match_cost_2[mask_i] = 1 - dinov1_region_match_sim_2[mask_idx]
-        else:
+        if (~valid_mask_2[mask_i]).float().mean() > occlusion_threshold:
             dinov1_region_match_cost_2[mask_i] = 0
-
-    dinov1_region_match_cost_1[~valid_mask_1] = 0
-    dinov1_region_match_cost_2[~valid_mask_2] = 0
+        else:
+            dinov1_region_match_cost_2[mask_i] = 1 - dinov1_region_match_sim_2[mask_idx]
     
     return (dinov1_region_match_cost_1, dinov1_region_match_cost_2, 
             dinov1_region_match_sim_1_index, dinov1_region_match_sim_2_index,

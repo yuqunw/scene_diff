@@ -48,6 +48,7 @@ def load_config(config_path):
     
     # Force enable point cloud visualization
     config['visualization']['vis_pc'] = True
+    config['visualization']['save_gt_visualization'] = False
     config['visualization']['save_detections'] = False  # Disable other vis
     
     return config
@@ -152,7 +153,7 @@ def run_scenediff_demo(video1_path, video2_path, config_path, output_dir, resamp
             file_list,
             img_1_length=len(video1_frames),
             img_2_length=len(video2_frames),
-            output_dir=Path(output_dir) / 'results'
+            output_dir=Path(output_dir) / f'{video1_path.split("/")[-1].split(".")[0]}_{video2_path.split("/")[-1].split(".")[0]}'
         )
         
         print("\n" + "="*80)
@@ -160,7 +161,7 @@ def run_scenediff_demo(video1_path, video2_path, config_path, output_dir, resamp
         print("="*80)
         
         # Print output locations
-        results_dir = Path(output_dir) / 'results'
+        results_dir = Path(output_dir) / f'{video1_path.split("/")[-1].split(".")[0]}_{video2_path.split("/")[-1].split(".")[0]}'
         print(f"\nOutput files:")
         print(f"  Object masks: {results_dir / 'object_masks.pkl'}")
         print(f"\nPoint cloud visualizations:")
@@ -234,7 +235,7 @@ def main():
     parser.add_argument(
         '--config',
         type=str,
-        default='scenediff_config.yml',
+        default='configs/scenediff_config.yml',
         help='Path to configuration file (default: scenediff_config.yml)'
     )
     parser.add_argument(

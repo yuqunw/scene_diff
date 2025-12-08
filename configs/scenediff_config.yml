@@ -8,7 +8,7 @@ models:
     device: "cuda"
   
   sam:
-    checkpoint: "/home/yuqun/research/multi_purpose_nerf/dino_sam_scannet_save/segment_anything_main/checkpoints/sam_vit_h_4b8939.pth"
+    checkpoint: "checkpoints/sam_vit_h_4b8939.pth"
     points_per_side: 32
     pred_iou_thresh: 0.7
     box_nms_thresh: 0.7
@@ -23,7 +23,7 @@ models:
 
 # Dataset Configuration
 dataset:
-  gt_dir: "/home/yuqun/research/scene_change/sam2_labeling/results_valid"
+  gt_dir: "data/scenediff_benchmark"
   splits:
     val: "splits/val_split.json"
     test: "splits/test_split.json"
@@ -31,33 +31,33 @@ dataset:
 
 # Processing Configuration
 processing:
-  visible_percentage: 0.5
-  subsample_size: 1000000
-  total_voxel_number: 200
-  occlusion_threshold: -0.02
+  visible_percentage: 0.5 # Visible percentage for view pairing
+  subsample_size: 1000000 # Subsample size for point cloud generation
+  total_voxel_number: 200 # Total number of voxels in geometry normalization
+  occlusion_threshold: -0.02 # Occlusion threshold
 
 # Cost Computation Weights
 costs:
-  lambda_geo: 1.0
-  lambda_dino: 0.5
-  lambda_dino_region_match: 0.2
+  lambda_geo: 1.0 # Weight for geometric score
+  lambda_dino: 0.5 # Weight for appearance score
+  lambda_dino_region_match: 0.2 # Weight for region matching score
 
 # Object Detection Thresholds
 detection:
-  min_detection_pixel: 100
+  min_detection_pixel: 100 # Minimum number of pixels for detection
   threshold_method: "max_entropy"  # Options: "otsu", "max_entropy"
   change_region_threshold: null  # null for auto, or specify a float
-  filter_percentage_before_threshold: 0.5
-  max_score: 0.5
-  max_detected_objects: 1000
+  filter_percentage_before_threshold: 0.5 # Percentage of pixels to filter before thresholding
+  max_score: 0.5 # Maximum score for detection
+  max_detected_objects: 1000 # Maximum number of objects to detect
 
 # Object Merging Parameters
 merging:
-  geometry_distance_threshold_of_voxel_size: 2
-  visual_threshold_ratio: 0.7
-  geometry_threshold_ratio: 0.5
-  general_threshold: 1.4
-  object_similarity_threshold: 0.7
+  geometry_distance_threshold_of_voxel_size: 2 # Distance threshold for geometric matching of voxels
+  visual_threshold_ratio: 0.7 # Visual similarity threshold for merging obejcts within each video
+  geometry_threshold_ratio: 0.5 # Geometric similarity threshold for merging obejcts within each video
+  general_threshold: 1.4 # Combined similarity threshold for merging obejcts within each video
+  object_similarity_threshold: 0.7 # Similarity threshold for pairing moved objects across videos
 
 # Aggregation Options
 aggregation:

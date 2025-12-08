@@ -2,7 +2,6 @@ cyws-3d.ckpt
 output/
 vis_figures/
 save_dir/
-*.png
 .vscode/
 __pycache__/
 
@@ -10,3 +9,5 @@ __pycache__/
 data_splits/
 *.pkl
 eval_list_dir/
+data/
+checkpoints/

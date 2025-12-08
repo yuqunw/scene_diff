@@ -147,7 +147,7 @@ class GeometryModel:
         
         return depth_scaled, points_scaled, poses_scaled, voxel_size
     
-    def compute_per_image_confidence(self, single_image, threshold=0.5):
+    def compute_per_image_confidence(self, single_image, threshold=0.1):
         """
         Compute confidence map for a single image.
         
