@@ -21,7 +21,10 @@ from pathlib import Path
 import yaml
 import torch
 
-from modules.scene_diff import SceneDiff
+# Add parent directory to path for module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from modules import SceneDiff
 from utils import process_video_to_frames
 
 

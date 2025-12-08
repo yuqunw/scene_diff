@@ -173,7 +173,7 @@ def example_4_custom_processing():
         'detection': {
             'min_detection_pixel': 150,  # Larger minimum size
             'threshold_method': 'otsu',
-            'object_threshold': None,
+            'change_region_threshold': None,
             'filter_percentage_before_threshold': 0.7,
             'max_score': 0.5,
         },

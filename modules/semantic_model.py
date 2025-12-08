@@ -12,8 +12,6 @@ import numpy as np
 
 from utils import (
     predict_dinov3_feat,
-    reprojected_feature,
-    get_dino_matched_region_cost,
 )
 
 
@@ -36,8 +34,6 @@ class SemanticModel:
         self.model = None
         self.feature_dim = config['models']['dinov3']['feature_dim']
         
-        # Load DINOv3 model
-        self._load_dinov3_model()
     
     def _load_dinov3_model(self):
         """Load DINOv3 model."""

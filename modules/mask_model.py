@@ -11,10 +11,10 @@ import numpy as np
 import cv2
 import torch
 from PIL import Image
-from pathlib import Path
 
-from utils import predict_mask, reorder_mask, remove_small_masks, masks_update
-
+from utils import reorder_mask, remove_small_masks, masks_update
+import sys
+import os
 
 class MaskModel:
     """
@@ -40,9 +40,6 @@ class MaskModel:
             # Should work if the segment_anything_ls is installed as package
             from segment_anything_ls import build_sam, SamAutomaticMaskGenerator
         except ImportError:
-            # Add segment_anything_ls to sys.path and import it
-            import sys
-            import os
             # Get project root (go up from modules/ to project root)
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             segment_ls_path = os.path.join(project_root, 'submodules/segment-anything-langsplat-modified')
@@ -150,7 +147,7 @@ class MaskModel:
         masks_list = []
         for idx, filepath in enumerate(file_list):
             image = np.array(Image.open(filepath)).astype(np.uint8)
-            mask = predict_mask(image, self.mask_generator)
+            mask = self.predict_mask(image, self.mask_generator)
             mask = cv2.resize(
                 mask.astype(np.float32),
                 (W, H),

@@ -17,8 +17,11 @@ from pathlib import Path
 import yaml
 import torch
 
+# Add parent directory to path for module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Import after paths are set
-from modules.scene_diff import SceneDiff
+from modules import SceneDiff
 from utils import process_video_to_frames
 
 
@@ -147,14 +150,14 @@ def prepare_scene_data(scene_dir, resample_rate):
     return img_1_list, img_2_list
 
 
-def process_single_scene(scene_name, scene_dir, scene_diff, config):
+def process_single_scene(scene_name, scene_dir, scene_diff_model, config):
     """
     Process a single scene for change detection.
     
     Args:
         scene_name: Name of the scene
         scene_dir: Path to scene directory
-        scene_diff: SceneDiff instance
+        scene_diff_model: SceneDiff instance
         config: Configuration dictionary
         
     Returns:
@@ -179,20 +182,20 @@ def process_single_scene(scene_name, scene_dir, scene_diff, config):
     print(f"  Video 2: {len(img_2_list)} frames")
     
     # Process scene
-    try:
-        output_dir = Path(config['output']['output_dir'])
-        scene_diff.process_scene(
-            file_list,
-            len(img_1_list),
-            len(img_2_list),
-            output_dir
-        )
-        return True
-    except Exception as e:
-        print(f"Error processing {scene_name}: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    # try:
+    output_dir = Path(config['output']['output_dir'])
+    scene_diff_model.process_scene(
+        file_list,
+        len(img_1_list),
+        len(img_2_list),
+        output_dir
+    )
+    return True
+    # except Exception as e:
+    #     print(f"Error processing {scene_name}: {e}")
+    #     import traceback
+    #     traceback.print_exc()
+    #     return False
 
 
 def main():
@@ -205,7 +208,7 @@ def main():
     parser.add_argument(
         '--config',
         type=str,
-        default='scenediff_config.yml',
+        default='configs/scenediff_config.yml',
         help='Path to configuration file'
     )
     
@@ -229,25 +232,25 @@ def main():
     parser.add_argument(
         '--output_dir',
         type=str,
-        default=None,
+        default='output',
         help='Override output directory from config'
     )
     parser.add_argument(
         '--use_cache',
-        type=lambda x: x.lower() == 'true',
-        default=None,
+        type=eval,
+        default=False,
         help='Override use_cache from config'
     )
     parser.add_argument(
         '--save_cache',
-        type=lambda x: x.lower() == 'true',
-        default=None,
+        type=eval,
+        default=False,
         help='Override save_cache from config'
     )
     parser.add_argument(
         '--vis_pc',
-        type=lambda x: x.lower() == 'true',
-        default=None,
+        type=eval,
+        default=False,
         help='Override vis_pc from config'
     )
     
@@ -281,6 +284,9 @@ def main():
         valid_scenes.copy(),
         output_dir
     )
+
+    # Hack!
+    scenes_to_process = ['IMG_4270_IMG_4271']
     
     print(f'Scenes to process: {len(scenes_to_process)}')
     print(f'Already processed: {len(finished_scenes)}')
@@ -293,7 +299,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nUsing device: {device}")
     
-    scene_diff = SceneDiff(config, device)
+    scene_diff_model = SceneDiff(config, device)
     
     # Process each scene
     gt_dir = Path(config['dataset']['gt_dir'])
@@ -307,7 +313,7 @@ def main():
             print(f"Scene directory not found: {scene_dir}")
             continue
         
-        success = process_single_scene(scene_name, scene_dir, scene_diff, config)
+        success = process_single_scene(scene_name, scene_dir, scene_diff_model, config)
         
         if success:
             success_count += 1
@@ -315,7 +321,7 @@ def main():
             failure_count += 1
     
     # Clean up
-    scene_diff.cleanup()
+    scene_diff_model.cleanup()
     
     # Print summary
     print(f"\n{'='*80}")

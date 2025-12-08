@@ -29,13 +29,7 @@ import faiss
 # Add submodules to path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 PI3_PATH = os.path.join(PROJECT_ROOT, 'submodules/Pi3')
-VGGT_PATH = os.path.join(PROJECT_ROOT, 'submodules/vggt')
-SEGMENT_LS_PATH = os.path.join(PROJECT_ROOT, 'submodules/segment_ls')
 
-sys.path.append(VGGT_PATH)
-sys.path.append(SEGMENT_LS_PATH)
-
-from preprocess import masks_update
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -140,7 +134,7 @@ def normalized_view_plane_uv(width: int, height: int, aspect_ratio: float = None
 
 def recover_focal_shift(points: torch.Tensor, mask: torch.Tensor = None, 
                        focal: torch.Tensor = None, 
-                       downsample_size: Tuple[int, int] = (64, 64)):
+                       downsample_size: tuple[int, int] = (64, 64)):
     """
     Recover focal length and depth shift from point map.
     
@@ -892,8 +886,7 @@ def compute_scale_and_shift(prediction, target, mask):
 
 
 def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged, 
-                                 sam_mask_2_merged, vis_1, vis_2, 
-                                 foreground_dis_1, foreground_dis_2):
+                                 sam_mask_2_merged, valid_mask_1, valid_mask_2):
     """
     Compute region matching cost using DINO features.
     
@@ -902,8 +895,8 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
         dinov1_feat_2: DINO features for image 2 (C, H, W)
         sam_mask_1_merged: Segmentation mask for image 1 (H, W)
         sam_mask_2_merged: Segmentation mask for image 2 (H, W)
-        vis_1: Visibility mask for image 1 (H, W)
-        vis_2: Visibility mask for image 2 (H, W)
+        valid_mask_1: Valid mask for image 1 (H, W)
+        valid_mask_2: Valid mask for image 2 (H, W)
         foreground_dis_1: Foreground distance for image 1 (H, W)
         foreground_dis_2: Foreground distance for image 2 (H, W)
         
@@ -947,22 +940,22 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
         if mask_idx == -1:
             continue
         mask_i = sam_mask_1_merged == mask_idx
-        if (foreground_dis_1[mask_i] < -0.05).float().mean() > occlusion_threshold:
-            dinov1_region_match_cost_1[mask_i] = 0
-        else:
+        if (mask_i & valid_mask_1).float().sum() > (mask_i.float().sum() * occlusion_threshold):
             dinov1_region_match_cost_1[mask_i] = 1 - dinov1_region_match_sim_1[mask_idx]
+        else:
+            dinov1_region_match_cost_1[mask_i] = 0
 
     for mask_idx in sam_mask_2_merged.unique():
         if mask_idx == -1:
             continue
         mask_i = sam_mask_2_merged == mask_idx
-        if (foreground_dis_2[mask_i] < -0.05).float().mean() > occlusion_threshold:
-            dinov1_region_match_cost_2[mask_i] = 0
-        else:
+        if (mask_i & valid_mask_2).float().sum() > (mask_i.float().sum() * occlusion_threshold):
             dinov1_region_match_cost_2[mask_i] = 1 - dinov1_region_match_sim_2[mask_idx]
+        else:
+            dinov1_region_match_cost_2[mask_i] = 0
 
-    dinov1_region_match_cost_1[~vis_1] = 0
-    dinov1_region_match_cost_2[~vis_2] = 0
+    dinov1_region_match_cost_1[~valid_mask_1] = 0
+    dinov1_region_match_cost_2[~valid_mask_2] = 0
     
     return (dinov1_region_match_cost_1, dinov1_region_match_cost_2, 
             dinov1_region_match_sim_1_index, dinov1_region_match_sim_2_index,

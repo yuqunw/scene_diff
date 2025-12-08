@@ -60,6 +60,7 @@ class SceneDiff:
         self.geometry_model = GeometryModel(config, device)
         self.mask_model = MaskModel(config, device)
         self.semantic_model = SemanticModel(config, device)
+        self.feature_dim = config['models']['dinov3']['feature_dim']
         
         print("SceneDiff pipeline initialized successfully!")
     
@@ -91,6 +92,7 @@ class SceneDiff:
         
         # Stage 2: Depth and Pose Estimation
         stage_start = time.time()
+        self.geometry_model._load_pi3_model() # Load the model when needed
         res = self.geometry_model.estimate_depth_and_poses(images)
         intrinsic = self.geometry_model.compute_intrinsics(res, file_list, H, W)
         
@@ -122,19 +124,22 @@ class SceneDiff:
         stage_start = time.time()
         conf_list = self._compute_confidence_maps(images, file_list)
         print(f"[Stage 4] Confidence computation: {time.time() - stage_start:.2f}s")
-        
+        self.geometry_model.cleanup() # Clean up the model to free up memory
+
         # Stage 5: SAM Masks
         stage_start = time.time()
         input_dir = Path(file_list[0]).parents[1]
         mask_file_path = input_dir / "sam_masks.pkl"
         masks_list = self.mask_model.load_or_generate_masks(file_list, H, W, mask_file_path)
         print(f"[Stage 5] SAM masks: {time.time() - stage_start:.2f}s")
-        
+        self.mask_model.cleanup() # Clean up the mask model to free up memory
+
         # Stage 6: Cost Map Computation
         stage_start = time.time()
         file_output_dir = Path(output_dir) / scene_name
         file_output_dir.mkdir(parents=True, exist_ok=True)
         
+        self.semantic_model._load_dinov3_model() # Load the model when needed
         total_cost_maps, total_visible_maps = self._compute_cost_maps(
             images, masks_list, poses, depth_map, intrinsic, conf_list,
             similarity_weights, pi3_masks, img_coors, grid_intrinsic,
@@ -165,10 +170,11 @@ class SceneDiff:
         print(f"[Stage 8] Object detection: {time.time() - stage_start:.2f}s")
         print(f"  Detected {len(object_results['merged_objects_1'])} objects in video 1, "
               f"{len(object_results['merged_objects_2'])} objects in video 2")
-        
+        self.semantic_model.cleanup() # Clean up the semantic model to free up memory
+
         # Stage 9: Object Association and Mask Generation
         stage_start = time.time()
-        object_masks = self._associate_and_save_objects(
+        object_masks, unit_ids = self._associate_and_save_objects(
             object_results, images, cluster_cost_1, cluster_cost_2,
             img_1_length, img_2_length, H, W, file_output_dir
         )
@@ -177,7 +183,7 @@ class SceneDiff:
         # Stage 10: Visualization (if enabled)
         if self.config['visualization']['vis_pc']:
             self._save_visualizations(
-                point_map, pc1_results, pc2_results, images, object_results,
+                point_map, pc1_results, pc2_results, images, object_results, unit_ids,
                 img_1_length, file_output_dir
             )
         
@@ -267,14 +273,45 @@ class SceneDiff:
         """
         # Reproject features
         feat_reprojected = reprojected_feature(
-            intrinsic_tgt.cuda(), pose_tgt.cuda(), depth_src.view(1, H, W),
-            intrinsic_src.cuda(), pose_src.cuda(), feat_tgt,
+            intrinsic_src.cuda(), pose_src.cuda(), depth_src.view(1, H, W),
+            intrinsic_tgt.cuda(), pose_tgt.cuda(), feat_tgt,
             img_coors, grid_intrinsic, H, W
         )
         
         # Compute cosine distance
         diff = 1 - torch.cosine_similarity(feat_reprojected, feat_src, dim=0)
         diff[occlusion_mask] = 0
+
+        # # Visualize features using PCA and plt.imshow
+        # from sklearn.decomposition import PCA
+        # import numpy as np
+
+        # # Get features as (C, H*W)
+        # feat_reprojected_flat = feat_reprojected.view(feat_reprojected.shape[0], -1).permute(1, 0).cpu().detach().numpy()  # shape (H*W, C)
+        # feat_src_flat = feat_src.view(feat_src.shape[0], -1).permute(1, 0).cpu().detach().numpy()  # shape (H*W, C)
+
+        # # Fit PCA on concatenated features (to align spaces)
+        # X = np.concatenate([feat_reprojected_flat, feat_src_flat], axis=0)
+        # pca = PCA(n_components=3)
+        # X_pca = pca.fit_transform(X)
+        # feat_reprojected_pca = X_pca[:feat_reprojected_flat.shape[0]].reshape(H, W, 3)
+        # feat_src_pca = X_pca[feat_reprojected_flat.shape[0]:].reshape(H, W, 3)
+
+        # # Normalize for visualization
+        # feat_reprojected_img = (feat_reprojected_pca - feat_reprojected_pca.min()) / (feat_reprojected_pca.max() - feat_reprojected_pca.min())
+        # feat_src_img = (feat_src_pca - feat_src_pca.min()) / (feat_src_pca.max() - feat_src_pca.min())
+
+        # plt.figure(figsize=(10,5))
+        # plt.subplot(1,2,1)
+        # plt.title("feat_reprojected PCA")
+        # plt.imshow(feat_reprojected_img)
+        # plt.axis('off')
+        # plt.subplot(1,2,2)
+        # plt.title("feat_src PCA")
+        # plt.imshow(feat_src_img)
+        # plt.axis('off')
+        # plt.tight_layout()
+        # plt.show()
         
         # Aggregate to regions
         region_diff = torch.zeros_like(sam_mask).float()
@@ -308,7 +345,7 @@ class SceneDiff:
         
         for i in range(n_images):
             img_np = images[i].permute(1, 2, 0).cpu().numpy()
-            feat = self.extract_features(img_np)
+            feat = self.semantic_model.extract_features(img_np)
             feat_list[i] = feat.permute(1, 2, 0)
         
         feat_flat = feat_list.view(-1, self.feature_dim)
@@ -334,27 +371,29 @@ class SceneDiff:
         """Compute cost maps for all images."""
         # Check for cache
         cache_config = self.config['cache']
+        cached = None
         if cache_config['use_cache']:
             cached = self._load_cached_cost_maps(output_dir, scene_name)
             if cached is not None:
-                return cached
+                total_cost_map_list, total_visible_map_list = cached
         
-        # Compute costs
-        total_cost_map_list = []
-        total_visible_map_list = []
-        
-        for idx in range(len(masks_list)):
-            weighted_cost, visible_map = self._compute_cost_maps_for_image(
-                idx, images, masks_list, poses, depth_map, intrinsic,
-                conf_list, similarity_weights, pi3_masks, img_coors,
-                grid_intrinsic, H, W
-            )
-            total_cost_map_list.append(weighted_cost)
-            total_visible_map_list.append(visible_map)
-        
-        # Save cache if enabled
-        if cache_config['save_cache']:
-            self._save_cost_maps(file_output_dir, total_cost_map_list, total_visible_map_list)
+        if (cached is None) or (not cache_config['use_cache']):
+            # Compute costs
+            total_cost_map_list = []
+            total_visible_map_list = []
+            
+            for idx in range(len(masks_list)):
+                weighted_cost, visible_map = self._compute_cost_maps_for_image(
+                    idx, images, masks_list, poses, depth_map, intrinsic,
+                    conf_list, similarity_weights, pi3_masks, img_coors,
+                    grid_intrinsic, H, W
+                )
+                total_cost_map_list.append(weighted_cost)
+                total_visible_map_list.append(visible_map)
+            
+            # Save cache if enabled
+            if cache_config['save_cache']:
+                self._save_cost_maps(file_output_dir, total_cost_map_list, total_visible_map_list)
         
         # Aggregate costs
         total_cost_map_list = torch.stack(total_cost_map_list)
@@ -365,7 +404,7 @@ class SceneDiff:
             costs_config['lambda_dino'] * total_cost_map_list[:, 2]
         )
         total_cost_maps = total_cost_maps.to(self.device)
-        total_visible_maps = torch.stack(total_visible_map_list, dim=0).view(-1).to(self.device)
+        total_visible_maps = torch.stack(total_visible_map_list, dim=0).to(self.device)
         
         return total_cost_maps, total_visible_maps
     
@@ -405,7 +444,7 @@ class SceneDiff:
             )
             
             # Aggregate geometric costs to regions
-            fg_region_geo_1 = self.mask_model.aggregate_to_regions(
+            fg_region_geo_cost_1 = self.mask_model.aggregate_to_regions(
                 geo_results['geo_cost_1'] * geo_results['vis_1'], sam_mask_1
             )
             
@@ -423,14 +462,13 @@ class SceneDiff:
             )
             
             # DINOv3 region matching cost
-            dino_region_match_1, _, _, _, _, _ = get_dino_matched_region_cost(
+            dino_region_match_cost_1, _, _, _, _, _ = get_dino_matched_region_cost(
                 dinov3_feat_1, dinov3_feat_2, sam_mask_1, sam_mask_2,
-                ~occlusion_mask_1, ~occlusion_mask_2,
-                geo_results['foreground_dis_1'], geo_results['foreground_dis_2']
+                ~occlusion_mask_1, ~occlusion_mask_2
             )
             
             # DINOv3 rendering cost
-            dino_render_cost_1 = self.semantic_model.compute_rendering_cost(
+            dino_render_cost_1 = self.compute_rendering_cost(
                 dinov3_feat_1, dinov3_feat_2, intrinsic_1, pose_1, depth_1,
                 intrinsic_2, pose_2, img_coors, grid_intrinsic, H, W,
                 occlusion_mask_1, sam_mask_1, geo_results['vis_1']
@@ -438,13 +476,13 @@ class SceneDiff:
             
             # Stack costs
             costs = torch.stack([
-                (fg_region_geo_1 * geo_results['vis_1']).cpu(),
-                (dino_region_match_1 * geo_results['vis_1']).cpu(),
+                (fg_region_geo_cost_1 * geo_results['vis_1']).cpu(),
+                (dino_region_match_cost_1 * geo_results['vis_1']).cpu(),
                 (dino_render_cost_1 * geo_results['vis_1']).cpu()
             ], dim=0)
             
             cost_map_list.append(costs)
-            visible_map_list.append((~occlusion_mask_1 & geo_results['vis_1']).cpu())
+            visible_map_list.append((~occlusion_mask_1).cpu())
         
         # Aggregate costs across views
         cost_maps = torch.stack(cost_map_list)
@@ -463,18 +501,18 @@ class SceneDiff:
         # Process point clouds
         pc1_results = self._process_point_cloud_costs(
             point_map[:img_1_length], total_cost_maps[:img_1_length],
-            total_visible_maps[:img_1_length * H * W], voxel_size, H, W
+            total_visible_maps[:img_1_length], voxel_size, H, W
         )
         pc2_results = self._process_point_cloud_costs(
             point_map[img_1_length:], total_cost_maps[img_1_length:],
-            total_visible_maps[img_1_length * H * W:], voxel_size, H, W
+            total_visible_maps[img_1_length:], voxel_size, H, W
         )
         
         # Extract DINOv3 features
-        pc1_dino_feat = self.semantic_model.aggregate_features_to_voxels(
+        pc1_dino_feat = self.aggregate_features_to_voxels(
             images[0][:img_1_length], pc1_results['voxel_indices'], H, W
         )
-        pc2_dino_feat = self.semantic_model.aggregate_features_to_voxels(
+        pc2_dino_feat = self.aggregate_features_to_voxels(
             images[0][img_1_length:], pc2_results['voxel_indices'], H, W
         )
         
@@ -561,26 +599,32 @@ class SceneDiff:
         detection_config = self.config['detection']
         merging_config = self.config['merging']
         
+        combined_cost = torch.cat([cluster_cost_1, cluster_cost_2], dim=0)
+        threshold = self._compute_changed_region_threshold(combined_cost, total_visible_maps)
         # Detect objects in video 1
         object_list_1, mask_index_1, threshold_1 = self._detect_objects(
             cluster_cost_1,
-            total_visible_maps[:img_1_length * H * W].view(img_1_length, H, W),
+            total_visible_maps[:img_1_length],
             masks_list[:img_1_length],
             pc1_results['voxel_locations'],
             pc1_results['voxel_indices'],
             pc1_dino_feat,
-            img_1_length, H, W
+            img_1_length, 
+            threshold,
+            H, W
         )
         
         # Detect objects in video 2
         object_list_2, mask_index_2, threshold_2 = self._detect_objects(
             cluster_cost_2,
-            total_visible_maps[img_1_length * H * W:].view(img_2_length, H, W),
+            total_visible_maps[img_1_length:],
             masks_list[img_1_length:],
             pc2_results['voxel_locations'],
             pc2_results['voxel_indices'],
             pc2_dino_feat,
-            img_2_length, H, W
+            img_2_length,
+            threshold,
+            H, W
         )
         
         # Merge objects across frames
@@ -613,18 +657,19 @@ class SceneDiff:
             'merged_objects_2': merged_object_list_2
         }
     
-    def _detect_objects(self, cluster_cost_maps, visible_maps, masks_list,
-                       voxel_locations, voxel_indices, dino_features,
-                       img_length, H, W):
-        """Detect objects by thresholding cost maps."""
+    def _compute_changed_region_threshold(self, combined_cost, visible_maps):
+        '''
+        Compute the threshold for changed regions. 
+        If change_region_threshold is not specified, compute the threshold using the visible cost values.
+        '''
         detection_config = self.config['detection']
         
         # Get visible cost values
-        visible_costs = cluster_cost_maps[visible_maps]
+        visible_costs = combined_cost[visible_maps]
         
         # Compute threshold
-        if detection_config['object_threshold'] is not None:
-            threshold = detection_config['object_threshold']
+        if detection_config['change_region_threshold'] is not None:
+            threshold = detection_config['change_region_threshold']
         else:
             quantile_val = torch.quantile(visible_costs, detection_config['filter_percentage_before_threshold'])
             filtered_costs = visible_costs[visible_costs > quantile_val]
@@ -635,6 +680,14 @@ class SceneDiff:
                 threshold = threshold_maximum_entropy(filtered_costs)
             else:
                 raise ValueError(f"Invalid threshold method: {detection_config['threshold_method']}")
+            
+        return threshold
+    
+    def _detect_objects(self, cluster_cost_maps, visible_maps, masks_list,
+                       voxel_locations, voxel_indices, dino_features,
+                       img_length, threshold, H, W):
+        """Detect objects by thresholding cost maps."""
+        detection_config = self.config['detection']
         
         # Threshold to get object masks
         object_masks = cluster_cost_maps > threshold
@@ -711,7 +764,7 @@ class SceneDiff:
             object_results['object_id_list_2'],
             object_results['mask_index_2'],
             unit_ids, images, cluster_cost_2,
-            img_2_length, H, W, colors, max_score, 'video_2', output_dir
+            img_2_length, H, W, colors, max_score, 'video_2', output_dir, img_1_length
         )
         
         # Merge masks
@@ -730,7 +783,7 @@ class SceneDiff:
         with open(output_masks_file, 'wb') as f:
             pickle.dump(object_masks, f)
         
-        return object_masks
+        return object_masks, unit_ids
     
     def _create_unified_object_ids(self, object_id_list_1, object_id_list_2, object_sim_matrix):
         """Create unified object IDs across two video sequences."""
@@ -762,8 +815,8 @@ class SceneDiff:
         return unit_ids
     
     def _save_object_masks(self, object_id_list, mask_indices, unit_ids, images,
-                          total_cluster_cost_maps, img_length, H, W, colors,
-                          max_score, video_key, output_dir):
+                          total_cluster_cost_maps, current_sequence_length, H, W, colors,
+                          max_score, video_key, output_dir, first_sequence_length=0):
         """Save object masks and visualizations."""
         object_masks = {}
         vis_dir = output_dir / f'{video_key}_detection'
@@ -782,8 +835,8 @@ class SceneDiff:
             for single_idx in object_id_indices:
                 single_mask = mask_indices == single_idx
                 
-                for frame_idx in range(img_length):
-                    frame_mask = single_mask.view(img_length, -1)[frame_idx].view(H, W)
+                for frame_idx in range(current_sequence_length):
+                    frame_mask = single_mask.view(current_sequence_length, -1)[frame_idx].view(H, W)
                     
                     if not frame_mask.any():
                         continue
@@ -810,7 +863,7 @@ class SceneDiff:
                     
                     # Save visualization
                     if self.config['visualization']['save_detections']:
-                        img_offset = 0 if video_key == 'video_1' else img_length
+                        img_offset = 0 if video_key == 'video_1' else first_sequence_length
                         rgb_image = images[0][frame_idx + img_offset].permute(1, 2, 0).cpu().numpy()
                         rgb_image[frame_mask.cpu().numpy().astype(bool)] = color.cpu().numpy()
                         vis_path = vis_dir / f'{video_key}_frame_{frame_idx}_obj_{object_id}.png'
@@ -831,7 +884,7 @@ class SceneDiff:
         return torch.cat([colors1, colors2, colors3], dim=0)
     
     def _save_visualizations(self, point_map, pc1_results, pc2_results, images,
-                            object_results, img_1_length, output_dir):
+                            object_results, unit_ids, img_1_length, output_dir):
         """Save point cloud visualizations."""
         # Cost map visualizations
         total_costs = torch.cat([pc1_results['cost_maps'], pc2_results['cost_maps']])
@@ -841,6 +894,16 @@ class SceneDiff:
         pcd.points = o3d.utility.Vector3dVector(point_map.reshape(-1, 3))
         pcd.colors = o3d.utility.Vector3dVector(cost_vis.reshape(-1, 3))
         o3d.io.write_point_cloud(str(output_dir / 'cost_map_merged.ply'), pcd)
+
+        pcd1 = o3d.geometry.PointCloud()
+        pcd1.points = o3d.utility.Vector3dVector(point_map[:img_1_length].reshape(-1, 3))
+        pcd1.colors = o3d.utility.Vector3dVector(cost_vis[:img_1_length].reshape(-1, 3))
+        o3d.io.write_point_cloud(str(output_dir / 'cost_map_1.ply'), pcd1)
+
+        pcd2 = o3d.geometry.PointCloud()
+        pcd2.points = o3d.utility.Vector3dVector(point_map[img_1_length:].reshape(-1, 3))
+        pcd2.colors = o3d.utility.Vector3dVector(cost_vis[img_1_length:].reshape(-1, 3))
+        o3d.io.write_point_cloud(str(output_dir / 'cost_map_2.ply'), pcd2)
         
         # Object instance visualizations
         colors = self._create_color_palette()
@@ -851,19 +914,17 @@ class SceneDiff:
             object_results['object_id_list_2'],
             object_results['mask_index_1'],
             object_results['mask_index_2'],
-            self._create_unified_object_ids(
-                object_results['object_id_list_1'],
-                object_results['object_id_list_2'],
-                torch.zeros(len(object_results['merged_objects_1']), len(object_results['merged_objects_2']))
-            ),
+            images[0][:img_1_length],
+            images[0][img_1_length:],
+            unit_ids,
             colors, output_dir
         )
     
     def _save_object_point_clouds(self, pc1_points, pc2_points, object_id_list_1, object_id_list_2,
-                                  mask_index_1, mask_index_2, unit_ids, colors, output_dir):
+                                  mask_index_1, mask_index_2, images_1, images_2, unit_ids, colors, output_dir):
         """Save point clouds colored by object ID."""
-        vis_pc_1 = torch.zeros(pc1_points.shape[0], 3).to(self.device)
-        vis_pc_2 = torch.zeros(pc2_points.shape[0], 3).to(self.device)
+        vis_pc_1 = images_1.permute(0, 2, 3, 1).reshape(-1, 3)
+        vis_pc_2 = images_2.permute(0, 2, 3, 1).reshape(-1, 3)
         
         # Color video 1 objects
         for obj_id in object_id_list_1.unique():

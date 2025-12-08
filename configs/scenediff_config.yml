@@ -8,7 +8,7 @@ models:
     device: "cuda"
   
   sam:
-    checkpoint: "${SAM_CHECKPOINT:/u/ywu20/sam_vit_h_4b8939.pth}"
+    checkpoint: "/home/yuqun/research/multi_purpose_nerf/dino_sam_scannet_save/segment_anything_main/checkpoints/sam_vit_h_4b8939.pth"
     points_per_side: 32
     pred_iou_thresh: 0.7
     box_nms_thresh: 0.7
@@ -23,7 +23,7 @@ models:
 
 # Dataset Configuration
 dataset:
-  gt_dir: "/work/nvme/bcqn/ywu20/scene_change/final_data/results_valid/"
+  gt_dir: "/home/yuqun/research/scene_change/sam2_labeling/results_valid"
   splits:
     val: "splits/val_split.json"
     test: "splits/test_split.json"
@@ -39,14 +39,14 @@ processing:
 # Cost Computation Weights
 costs:
   lambda_geo: 1.0
-  lambda_dino: 0.3
-  lambda_dino_region_match: 0.1
+  lambda_dino: 0.5
+  lambda_dino_region_match: 0.2
 
 # Object Detection Thresholds
 detection:
   min_detection_pixel: 100
-  threshold_method: "otsu"  # Options: "otsu", "max_entropy"
-  object_threshold: null  # null for auto, or specify a float
+  threshold_method: "max_entropy"  # Options: "otsu", "max_entropy"
+  change_region_threshold: null  # null for auto, or specify a float
   filter_percentage_before_threshold: 0.6
   max_score: 0.5
   max_detected_objects: 1000

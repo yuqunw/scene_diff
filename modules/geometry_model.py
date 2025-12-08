@@ -37,10 +37,8 @@ class GeometryModel:
         self.config = config
         self.device = device
         self.model = None
-        
-        # Load Pi3 model
-        self._load_pi3_model()
-    
+
+
     def _load_pi3_model(self):
         """Load Pi3 depth estimation model."""
         import sys

@@ -581,8 +581,8 @@ def detect_and_threshold_objects(total_cluster_cost_maps, total_visible_maps,
     visible_costs = total_cluster_cost_maps[total_visible_maps]
     
     # Compute threshold
-    if args.object_threshold is not None:
-        threshold = args.object_threshold
+    if args.change_region_threshold is not None:
+        threshold = args.change_region_threshold
     else:
         quantile_val = torch.quantile(visible_costs, args.filter_percentage_before_threshold)
         filtered_costs = visible_costs[visible_costs > quantile_val]
@@ -1341,7 +1341,7 @@ def main():
     parser.add_argument("--threshold_method", type=str, default='otsu',
                        choices=['otsu', 'max_entropy'],
                        help="Method for cost thresholding")
-    parser.add_argument("--object_threshold", type=float, default=None,
+    parser.add_argument("--change_region_threshold", type=float, default=None,
                        help="Manual threshold (overrides auto threshold)")
     parser.add_argument("--filter_percentage_before_threshold", type=float, default=0.6,
                        help="Filter low costs before thresholding")

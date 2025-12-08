@@ -224,7 +224,7 @@ python predict_multiview.py \
     --occlusion_threshold -0.02 \
     --min_detection_pixel 100 \
     --threshold_method otsu \
-    --object_threshold None \
+    --change_region_threshold None \
     --filter_percentage_before_threshold 0.6 \
     --max_score 0.5 \
     --geometry_distance_threshold_of_voxel_size 2 \

@@ -48,7 +48,7 @@ class ConfigManager:
         'detection': {
             'min_detection_pixel': 100,
             'threshold_method': 'otsu',
-            'object_threshold': None,
+            'change_region_threshold': None,
             'filter_percentage_before_threshold': 0.6,
             'max_score': 0.5,
             'max_detected_objects': 1000,
