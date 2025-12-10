@@ -44,30 +44,44 @@ This repository contains the code for the paper [SceneDiff: A Benchmark and Meth
 ## SceneDiff Benchmark
 
 Download the SceneDiff benchmark dataset from [🤗 Hugging Face](https://huggingface.co/datasets/yuqun/SceneDiff).
+```bash
+mkdir data && cd data
+wget https://huggingface.co/datasets/yuqun/SceneDiff/resolve/main/scenediff_bechmark.zip
+unzip scenediff_bechmark.zip
+```
 
 ### Dataset Structure
 
 ```
 scenediff_benchmark/
-├── sequence_pair_1/
-│   ├── original_video1.mp4   # Captured video before change (can have different extension)
-│   ├── original_video2.mp4   # Captured video after change
-│   ├── video1.mp4             # Video before change with annotation
-│   ├── video2.mp4             # Video after change with annotation
-│   └── segments.pkl           # Dense segmentations of changed objects (for evaluation)
-├── sequence_pair_2/
-└── ...
+├── data/                          # 350 sequence pairs
+│   ├── sequence_pair_1/
+│   │   ├── original_video1.mp4    # Raw video before change
+│   │   ├── original_video2.mp4    # Raw video after change
+│   │   ├── video1.mp4             # Video with annotation mask (before)
+│   │   ├── video2.mp4             # Video with annotation mask (after)
+│   │   ├── segments.pkl           # Dense segmentation masks for evaluation
+│   │   └── metadata.json          # Sequence metadata
+│   ├── sequence_pair_2/
+│   │   └── ...
+│   └── ...
+├── splits/                        # Val/Test splits
+│   ├── val_split.json
+│   └── test_split.json
+└── vis/                           # Visualization tools
+    ├── visualizer.py              # Flask-based web viewer
+    ├── requirements.txt
+    └── templates/
 ```
 
-**About `segments.pkl`:** See the [detailed description here](https://github.com/yuqunw/scenediff_annotator?tab=readme-ov-file#segments-structure).
+**About `segments.pkl`:** See the [detailed description here](https://huggingface.co/datasets/yuqun/SceneDiff#dataset-structure).
 
-**Visualization:** For better visualization, place the downloaded dataset as the `results` directory of the [SceneDiff Annotator](https://github.com/yuqunw/scenediff_annotator) and open the review interface.
+**Visualization:** For better visualization, run the command:
+```bash
+cd data/vis && pip install -r requirements.txt
+python visualizer.py
+```
 
-### Dataset Splits
-
-The dataset is divided into validation and test splits, stored in the `splits/` directory:
-- `splits/val_split.json` - Validation set with subsets: `varied`, `kitchen`
-- `splits/test_split.json` - Test set with subsets: `varied`, `kitchen`
 
 ### Evaluation
 We expect the method predictions have following structures:

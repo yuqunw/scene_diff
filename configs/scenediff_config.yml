@@ -25,8 +25,8 @@ models:
 dataset:
   gt_dir: "data/scenediff_benchmark"
   splits:
-    val: "splits/val_split.json"
-    test: "splits/test_split.json"
+    val: "data/scenediff_benchmark/splits/val_split.json"
+    test: "data/scenediff_benchmark/splits/test_split.json"
   resample_rate: 30
 
 # Processing Configuration
