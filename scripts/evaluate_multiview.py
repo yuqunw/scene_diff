@@ -1377,8 +1377,8 @@ def main():
     parser.add_argument('--splits', type=str, default='all', 
                        choices=['val', 'test', 'all'],
                        help='Dataset split to evaluate')
-    parser.add_argument('--sets', type=str, default='All',
-                       choices=['Diverse', 'Kitchen', 'All'],
+    parser.add_argument('--sets', type=str, default='all',
+                       choices=['varied', 'kitchen', 'all'],
                        help='Dataset subset to evaluate')
     
     # Visualization options
@@ -1393,10 +1393,10 @@ def main():
     
     # Load dataset splits
     val_split = json.load(open('splits/val_split.json', 'r'))
-    val_split['All'] = val_split['Diverse'] + val_split['Kitchen']
+    val_split['all'] = val_split['varied'] + val_split['kitchen']
     
     test_split = json.load(open('splits/test_split.json', 'r'))
-    test_split['All'] = test_split['Diverse'] + test_split['Kitchen']
+    test_split['all'] = test_split['varied'] + test_split['kitchen']
     
     # Determine scenes to evaluate
     if args.splits == 'all':

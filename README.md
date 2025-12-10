@@ -66,8 +66,8 @@ scenediff_benchmark/
 ### Dataset Splits
 
 The dataset is divided into validation and test splits, stored in the `splits/` directory:
-- `splits/val_split.json` - Validation set with subsets: `Diverse`, `Kitchen`
-- `splits/test_split.json` - Test set with subsets: `Diverse`, `Kitchen`
+- `splits/val_split.json` - Validation set with subsets: `varied`, `kitchen`
+- `splits/test_split.json` - Test set with subsets: `varied`, `kitchen`
 
 ### Evaluation
 We expect the method predictions have following structures:
@@ -113,7 +113,7 @@ python scripts/evaluate_multiview.py \
     --duplicate_match_threshold 2 \
     --per_frame_duplicate_match_threshold 2 \
     --splits val \
-    --sets Diverse \
+    --sets varied \
     --output_path ${OUTPUT_FILE_PATH} \
     --visualize False
 ```
@@ -122,7 +122,7 @@ python scripts/evaluate_multiview.py \
 - `--duplicate_match_threshold`: Tolerance for duplicate objects across frames (default: 2)
 - `--per_frame_duplicate_match_threshold`: Tolerance for duplicate regions per frame (default: 2)
 - `--splits`: Choose from `val`, `test`, or `all`
-- `--sets`: Choose from `Diverse`, `Kitchen`, or `All`
+- `--sets`: Choose from `varied`, `kitchen`, or `All`
 - `--visualize`: Set to `True` to save visualization outputs
 
 **Output:** The evaluation results will be saved to `${OUTPUT_FILE_PATH}`
@@ -188,13 +188,13 @@ Run inference on all sequences in the benchmark:
 python scripts/predict_multiview.py \
     --config configs/scenediff_config.yml \
     --splits val \
-    --sets Diverse \
+    --sets varied \
     --output_dir output/scenediff_benchmark
 ```
 
 **Arguments:**
 - `--splits`: Choose from `val`, `test`, or `all`
-- `--sets`: Choose from `Diverse`, `Kitchen`, or `All`
+- `--sets`: Choose from `varied`, `kitchen`, or `All`
 - `--output_dir`: Directory to save predictions
 - Modify more arguments in the config file
 

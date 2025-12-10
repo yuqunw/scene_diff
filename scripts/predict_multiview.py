@@ -68,10 +68,10 @@ def get_scenes_to_process(config, args):
     test_split_path = config['dataset']['splits']['test']
     
     val_split = json.load(open(val_split_path, 'r'))
-    val_split['All'] = val_split.get('Diverse', []) + val_split.get('Kitchen', [])
+    val_split['all'] = val_split.get('varied', []) + val_split.get('kitchen', [])
     
     test_split = json.load(open(test_split_path, 'r'))
-    test_split['All'] = test_split.get('Diverse', []) + test_split.get('Kitchen', [])
+    test_split['all'] = test_split.get('varied', []) + test_split.get('kitchen', [])
     
     # Determine scenes to process
     if args.splits == 'val':
@@ -223,8 +223,8 @@ def main():
     parser.add_argument(
         '--sets',
         type=str,
-        default='All',
-        choices=['Diverse', 'Kitchen', 'All'],
+        default='all',
+        choices=['varied', 'kitchen', 'all'],
         help='Dataset subset to process'
     )
     
