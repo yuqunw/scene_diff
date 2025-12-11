@@ -42,11 +42,13 @@ class SemanticModel:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         dinov3_path = os.path.join(project_root, 'submodules/dinov3')
         model_name = dinov3_config['model_name']
+        weight_url = dinov3_config['weight_url']
         
         self.model = torch.hub.load(
             dinov3_path,
             model_name,
-            source='local'
+            source='local',
+            weights=weight_url
         ).to(self.device).eval()
         
         print(f"[SemanticModel] Loaded DINOv3 model: {model_name}")

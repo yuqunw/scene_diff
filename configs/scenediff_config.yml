@@ -20,6 +20,7 @@ models:
   dinov3:
     model_name: "dinov3_vith16plus"
     feature_dim: 1280
+    weight_url: "TO_BE_FILLED"
 
 # Dataset Configuration
 dataset:

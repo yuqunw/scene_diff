@@ -169,12 +169,23 @@ python scripts/evaluate_multiview.py \
 
 ### Download Checkpoints
 
-Download the Segment-Anything checkpoint:
+**1. Download the Segment-Anything checkpoint:**
 ```bash
 bash checkpoints/download_sam_checkpoint.sh
 ```
 
-Other checkpoints will be automatically downloaded in the first run.
+**2. Configure DINOv3 checkpoint:**
+
+The DINOv3 checkpoint will be automatically downloaded on first use after filling in the checkpoint url. To set it up:
+
+1. Visit the [DINOv3 downloads page](https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/) to apply for the checkpoint access
+2. Right-click on `dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth` and copy the download link
+3. Update the URL in `configs/scenediff_config.yml`:
+   ```yaml
+   models:
+     dinov3:
+       weight_url: "<paste_your_copied_url_here>"
+   ```
 
 ## Quick Demo 
 
