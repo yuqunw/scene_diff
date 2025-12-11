@@ -46,7 +46,7 @@ This repository contains the code for the paper [SceneDiff: A Benchmark and Meth
 Download the SceneDiff benchmark dataset from [🤗 Hugging Face](https://huggingface.co/datasets/yuqun/SceneDiff).
 ```bash
 mkdir data && cd data
-wget https://huggingface.co/datasets/yuqun/SceneDiff/resolve/main/scenediff_bechmark.zip
+wget https://huggingface.co/datasets/yuqun/SceneDiff/resolve/main/scenediff_benchmark.zip
 unzip scenediff_bechmark.zip
 ```
 
@@ -78,7 +78,7 @@ scenediff_benchmark/
 
 **Visualization:** For better visualization, run the command:
 ```bash
-cd data/vis && pip install -r requirements.txt
+cd data/scenediff_benchmark/vis && pip install -r requirements.txt
 python visualizer.py
 ```
 
