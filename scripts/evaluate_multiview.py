@@ -706,24 +706,28 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         
         pred_data = {k: v for k, v in pred_data.items() if k not in ['H', 'W']}
         # Add labels and confidence to prediction objects
+        # Track objects to remove (those without valid video data)
+        objects_to_remove = []
         for obj_k, obj_v in pred_data.items():
-            if obj_k in ['H', 'W']:
-                pred_data.pop(obj_k)
-                continue
-            
             # Determine label
             if 'video_1' in obj_v and 'video_2' in obj_v:
                 pred_data[obj_k]['label'] = 1  # Moved
             elif 'video_1' in obj_v or 'video_2' in obj_v:
                 pred_data[obj_k]['label'] = 0  # Non-moved
             else:
+                # Object has no video data - mark for removal
+                objects_to_remove.append(obj_k)
                 continue
             
             # Compute confidence
             pred_data[obj_k]['confidence'] = compute_object_confidence(obj_v)
         
+        # Remove invalid objects
+        for obj_k in objects_to_remove:
+            del pred_data[obj_k]
+        
         # Match detections to ground truth (per-view)
-        scene_gt_matched = {k: False for k in scene_gt_objects.keys()}
+        scene_gt_matched = {k: 0 for k in scene_gt_objects.keys()}
         match_detections_to_gt(
             scene_region_detections, scene_gt_objects, scene_gt_labels,
             scene_gt_matched, all_region_detections_info, scene_name, args
@@ -924,19 +928,24 @@ def match_detections_to_gt(scene_region_detections, scene_gt_objects, scene_gt_l
         }
         
         # Check if GT was already matched
+        add_to_list = True
         if best_gt_key is not None:
-            if not scene_gt_matched[best_gt_key]:
+            if scene_gt_matched[best_gt_key] == 0:
+                # First match - count as true positive
                 detection_info['gt_matched'] = True
                 detection_info['gt_label'] = scene_gt_labels[best_gt_key]
                 detection_info['gt_obj_id'] = best_gt_key[0]
-                scene_gt_matched[best_gt_key] = True
-                all_region_detections_info.append(detection_info)
+                scene_gt_matched[best_gt_key] = 1
             elif scene_gt_matched[best_gt_key] < args.per_frame_duplicate_match_threshold:
+                # Duplicate within threshold - count as TP but don't add to avoid double counting
                 scene_gt_matched[best_gt_key] += 1
                 detection_info['gt_matched'] = True
                 detection_info['gt_label'] = scene_gt_labels[best_gt_key]
                 detection_info['gt_obj_id'] = best_gt_key[0]
-        else:
+                add_to_list = False
+            # else: duplicate over threshold - remains as FP (gt_matched=False)
+        
+        if add_to_list:
             all_region_detections_info.append(detection_info)
 
 
