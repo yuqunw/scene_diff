@@ -23,7 +23,7 @@ models:
 
 # Dataset Configuration
 dataset:
-  gt_dir: "data/scenediff_benchmark"
+  gt_dir: "data/scenediff_benchmark/data"
   splits:
     val: "data/scenediff_benchmark/splits/val_split.json"
     test: "data/scenediff_benchmark/splits/test_split.json"

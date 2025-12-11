@@ -285,8 +285,6 @@ def main():
         output_dir
     )
 
-    # Hack!
-    scenes_to_process = ['IMG_4270_IMG_4271']
     
     print(f'Scenes to process: {len(scenes_to_process)}')
     print(f'Already processed: {len(finished_scenes)}')
