@@ -146,14 +146,14 @@ python scripts/evaluate_multiview.py \
 
 1. **Clone this repository with submodules:**
     ```bash
-    git clone --recursive https://github.com/yuqunw/scenediff.git
-    cd scenediff
+    git clone --recursive https://github.com/yuqunw/scene_diff.git
+    cd scene_diff
     ```
 
 2. **Create conda environment and install dependencies:**
     ```bash
-    conda create -n scenediff python=3.10 -y
-    conda activate scenediff
+    conda create -n scene_diff python=3.10 -y
+    conda activate scene_diff
     pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121 # Install the pytorch fitting your nvcc version 
     pip install -r requirements.txt
     pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu121.html # install torch_scatter
