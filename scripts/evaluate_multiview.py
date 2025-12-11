@@ -3,8 +3,8 @@ Scene Change Detection Evaluation Metrics
 
 This module computes evaluation metrics for scene change detection:
 - Per-view Average Precision (AP)
-- Class-agnostic object-level AP
-- Class-aware object-level AP
+- Type-agnostic object-level AP
+- Type-aware object-level AP
 
 The evaluation uses:
 - Center point matching for detection-GT correspondence
@@ -81,91 +81,6 @@ def compute_iou(mask1, mask2):
     intersection = torch.logical_and(mask1, mask2).sum().item()
     union = torch.logical_or(mask1, mask2).sum().item()
     return intersection / union if union > 0 else 0
-
-
-def compute_ap(gt_objects, detected_objects, iou_threshold=0.5):
-    """
-    Compute Average Precision for object detection using VOC evaluation.
-    
-    Args:
-        gt_objects: Dictionary of ground truth objects
-        detected_objects: Dictionary of detected objects with confidence scores
-        iou_threshold: IoU threshold for a positive detection
-        
-    Returns:
-        Tuple of (AP, precisions, recalls)
-    """
-    # Flatten detections and sort by confidence
-    all_detections = []
-    for obj_id, frames in detected_objects.items():
-        for frame_idx, data in frames.items():
-            all_detections.append({
-                'obj_id': obj_id,
-                'frame_idx': frame_idx,
-                'mask': data['mask'],
-                'confidence': data['cost']
-            })
-    
-    # Sort detections by confidence (descending)
-    all_detections = sorted(all_detections, key=lambda x: x['confidence'], reverse=True)
-    
-    # Count total ground truth objects
-    gt_count = sum(len(frames) for obj_id, frames in gt_objects.items())
-    
-    # Initialize arrays for precision-recall calculation
-    tp = np.zeros(len(all_detections))
-    fp = np.zeros(len(all_detections))
-    
-    # Track matched ground truth objects
-    gt_matched = {obj_id: {frame_idx: False for frame_idx in frames} 
-                 for obj_id, frames in gt_objects.items()}
-    
-    # Evaluate each detection
-    for i, detection in enumerate(all_detections):
-        frame_idx = detection['frame_idx']
-        det_mask = detection['mask']
-        
-        # Find best matching ground truth
-        max_iou = 0
-        best_gt_obj_id = None
-        
-        for gt_obj_id, gt_frames in gt_objects.items():
-            if frame_idx in gt_frames:
-                gt_mask = gt_frames[frame_idx]
-                iou = compute_iou(det_mask, gt_mask)
-                if iou > max_iou:
-                    max_iou = iou
-                    best_gt_obj_id = gt_obj_id
-        
-        # Check if detection matches ground truth
-        if max_iou >= iou_threshold and best_gt_obj_id is not None and \
-           not gt_matched[best_gt_obj_id][frame_idx]:
-            tp[i] = 1  # True positive
-            gt_matched[best_gt_obj_id][frame_idx] = True
-        else:
-            fp[i] = 1  # False positive
-    
-    # Compute precision and recall
-    tp_cumsum = np.cumsum(tp)
-    fp_cumsum = np.cumsum(fp)
-    recalls = tp_cumsum / gt_count if gt_count > 0 else np.zeros_like(tp_cumsum)
-    precisions = tp_cumsum / (tp_cumsum + fp_cumsum)
-    
-    # Compute AP using VOC method
-    mrec = np.concatenate(([0.0], recalls, [1.0]))
-    mpre = np.concatenate(([0.0], precisions, [0.0]))
-    
-    # Compute precision envelope
-    for i in range(mpre.size - 1, 0, -1):
-        mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
-    
-    # Find where recall changes
-    i = np.where(mrec[1:] != mrec[:-1])[0]
-    
-    # Sum (\Delta recall) * precision
-    ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
-    
-    return ap, precisions, recalls
 
 
 # ============================================================================
@@ -656,8 +571,8 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     
     Computes three types of Average Precision:
     1. Per-view AP: Detection accuracy at the frame level
-    2. Class-agnostic object-level AP: Object detection regardless of type
-    3. Class-aware object-level AP: Object detection with type classification
+    2. Type-agnostic object-level AP: Object detection regardless of type
+    3. Type-aware object-level AP: Object detection with type classification
     
     Args:
         valid_scene_names: List of scene names to evaluate
@@ -680,7 +595,7 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         total_gt_objects_count[scene_name] = {0: 0, 1: 0}  # non-moved, moved
         
         # Get paths
-        pred_dir = get_prediction_dir(args.pred_dir, scene_name, args.back_string)
+        pred_dir = get_prediction_dir(args.pred_dir, scene_name)
         gt_dir = Path(args.gt_dir) / scene_name
         video_dir = Path(args.video_dir) / scene_name
         
@@ -763,10 +678,8 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     print_and_save_results(metrics, save_result_path, valid_scene_names, args)
 
 
-def get_prediction_dir(pred_dir, scene_name, back_string):
+def get_prediction_dir(pred_dir, scene_name):
     """Get prediction directory path."""
-    if back_string:
-        return Path(pred_dir) / f"{scene_name}_{back_string}"
     return Path(pred_dir) / scene_name
 
 
@@ -953,7 +866,7 @@ def evaluate_object_level(pred_data, gt_data, scene_gt_objects, scene_gt_labels,
                           all_object_level_detection_info,
                           all_object_level_detection_info_by_label,
                           scene_name, H, W, args):
-    """Evaluate object-level metrics (both class-agnostic and class-aware)."""
+    """Evaluate object-level metrics (both Type-agnostic and Type-aware)."""
     # Organize GT objects
     gt_objects = organize_gt_objects(scene_gt_objects, scene_gt_labels)
     
@@ -961,13 +874,13 @@ def evaluate_object_level(pred_data, gt_data, scene_gt_objects, scene_gt_labels,
     gt_objects_duplicate = duplicate_moved_objects(gt_objects)
     pred_objects_duplicate = duplicate_moved_predictions(pred_data)
     
-    # Class-agnostic evaluation
+    # Type-agnostic evaluation
     evaluate_class_agnostic(
         pred_objects_duplicate, gt_objects_duplicate,
         all_object_level_detection_info, scene_name, args
     )
     
-    # Class-aware evaluation
+    # Type-aware evaluation
     evaluate_class_aware(
         pred_data, gt_objects,
         all_object_level_detection_info_by_label, scene_name, args
@@ -1057,7 +970,7 @@ def compute_object_confidence(obj_v):
 
 
 def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_name, args):
-    """Evaluate class-agnostic object-level AP."""
+    """Evaluate Type-agnostic object-level AP."""
     scene_gt_matched = {}
     
     for obj_k, obj_v in pred_objects:
@@ -1094,7 +1007,7 @@ def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_
 
 
 def evaluate_class_aware(pred_objects, gt_objects, all_detection_info, scene_name, args):
-    """Evaluate class-aware object-level AP."""
+    """Evaluate Type-aware object-level AP."""
     scene_gt_matched = {}
 
     pred_sorted = sorted(pred_objects.items(), key=lambda x: x[1]['confidence'], reverse=True)
@@ -1284,7 +1197,7 @@ def compute_final_metrics(all_region_detections_info, total_gt_regions_count,
     precisions = tp_cumsum / (tp_cumsum + fp_cumsum) if len(tp_cumsum) > 0 else np.zeros_like(tp_cumsum)
     per_view_ap = calculate_voc_ap(recalls, precisions)
     
-    # Class-agnostic object-level AP
+    # Type-agnostic object-level AP
     all_object_level_detection_info = sorted(all_object_level_detection_info, 
                                              key=lambda x: x['confidence'], reverse=True)
     tp_obj = np.array([1 if d['matched'] else 0 for d in all_object_level_detection_info])
@@ -1299,7 +1212,7 @@ def compute_final_metrics(all_region_detections_info, total_gt_regions_count,
     precisions_obj = tp_obj_cumsum / (tp_obj_cumsum + fp_obj_cumsum) if len(tp_obj_cumsum) > 0 else np.zeros_like(tp_obj_cumsum)
     class_agnostic_ap = calculate_voc_ap(recalls_obj, precisions_obj)
     
-    # Class-aware object-level AP
+    # Type-aware object-level AP
     all_object_level_detection_info_by_label = sorted(all_object_level_detection_info_by_label,
                                                       key=lambda x: x['confidence'], reverse=True)
     tp_label = np.array([1 if d['matched'] else 0 for d in all_object_level_detection_info_by_label])
@@ -1330,8 +1243,8 @@ def print_and_save_results(metrics, save_path, valid_scene_names, args):
     print("="*80)
     print(f"Number of scenes: {len(valid_scene_names)}")
     print(f"\nPer-view AP: {metrics['per_view_ap']:.4f}")
-    print(f"Class-agnostic object AP: {metrics['class_agnostic_ap']:.4f}")
-    print(f"Class-aware object AP: {metrics['class_aware_ap']:.4f}")
+    print(f"Type-agnostic object AP: {metrics['class_agnostic_ap']:.4f}")
+    print(f"Type-aware object AP: {metrics['class_aware_ap']:.4f}")
     print(f"\nTrue Positives: {metrics['tp_obj']:.0f}")
     print(f"False Positives: {metrics['fp_obj']:.0f}")
     print(f"False Negatives: {metrics['fn_obj']:.0f}")
@@ -1343,8 +1256,8 @@ def print_and_save_results(metrics, save_path, valid_scene_names, args):
         f.write(f"Duplicate match threshold: {args.duplicate_match_threshold}\n")
         f.write(f"Per-frame duplicate threshold: {args.per_frame_duplicate_match_threshold}\n\n")
         f.write(f"Per-view AP: {metrics['per_view_ap']:.4f}\n")
-        f.write(f"Class-agnostic object AP: {metrics['class_agnostic_ap']:.4f}\n")
-        f.write(f"Class-aware object AP: {metrics['class_aware_ap']:.4f}\n")
+        f.write(f"Type-agnostic object AP: {metrics['class_agnostic_ap']:.4f}\n")
+        f.write(f"Type-aware object AP: {metrics['class_aware_ap']:.4f}\n")
 
 
 # ============================================================================
@@ -1359,24 +1272,20 @@ def main():
     )
     
     # I/O arguments
-    parser.add_argument('--pred_dir', type=str, default='output',
+    parser.add_argument('--pred_dir', type=str, default='output/scenediff_benchmark/',
                        help='Directory containing prediction outputs')
     parser.add_argument('--gt_dir', type=str, 
-                       default='data/scenediff_benchmark',
+                       default='data/scenediff_benchmark/data',
                        help='Directory containing ground truth data')
     parser.add_argument('--video_dir', type=str,
-                       default='data/scenediff_benchmark',
+                       default='data/scenediff_benchmark/data',
                        help='Directory containing video files')
     parser.add_argument('--output_path', type=str, default='output/result.txt',
                        help='Output filename')
-    parser.add_argument('--back_string', type=str, default=None,
-                       help='Suffix for prediction directory names')
     
     # Evaluation parameters
     parser.add_argument('--resample_rate', type=int, default=30,
                        help='Frame sampling rate')
-    parser.add_argument('--iou_threshold', type=float, default=0.5,
-                       help='IoU threshold for matching')
     parser.add_argument('--duplicate_match_threshold', type=int, default=1,
                        help='Max matches per GT object (object-level)')
     parser.add_argument('--per_frame_duplicate_match_threshold', type=int, default=1,
@@ -1401,10 +1310,10 @@ def main():
     args = parser.parse_args()
     
     # Load dataset splits
-    val_split = json.load(open('splits/val_split.json', 'r'))
+    val_split = json.load(open('data/scenediff_benchmark/splits/val_split.json', 'r'))
     val_split['all'] = val_split['varied'] + val_split['kitchen']
     
-    test_split = json.load(open('splits/test_split.json', 'r'))
+    test_split = json.load(open('data/scenediff_benchmark/splits/test_split.json', 'r'))
     test_split['all'] = test_split['varied'] + test_split['kitchen']
     
     # Determine scenes to evaluate
@@ -1418,53 +1327,35 @@ def main():
         raise ValueError(f"Invalid split: {args.splits}")
     
     # Filter to only predicted scenes
-    all_scene_dirs = sorted(Path(args.gt_dir).iterdir())
     not_predicted = []
     
-    for scene_dir in all_scene_dirs:
-        if scene_dir.is_file():
-            continue
-        
-        found = False
-        for pred_dir in Path(args.pred_dir).glob(f'{scene_dir.name}*'):
-            if pred_dir.is_dir() and (pred_dir / 'object_masks.pkl').exists():
-                # Rename to standard format if needed
-                if pred_dir != Path(args.pred_dir) / scene_dir.name:
-                    try:
-                        os.rename(pred_dir, Path(args.pred_dir) / scene_dir.name)
-                        print(f'Renamed {pred_dir} -> {scene_dir.name}')
-                    except Exception as e:
-                        print(f'Error renaming: {e}')
-                found = True
-                break
-        
-        if not found:
-            try:
-                valid_scene_names.remove(scene_dir.name)
-                not_predicted.append(scene_dir.name)
-            except ValueError:
-                pass
+    for scene_name in valid_scene_names:
+        scene_dir = Path(args.pred_dir) / scene_name
+        if not (scene_dir / 'object_masks.pkl').exists():
+            not_predicted.append(scene_name)
     
+    for scene_name in not_predicted:
+        valid_scene_names.remove(scene_name)
+        
     print(f"\nEvaluating {len(valid_scene_names)} scenes")
     print(f"Not predicted: {len(not_predicted)} scenes")
     
     # Evaluate all scenes
-    save_result_path = args.output_path.replace('.txt', f'perframe{args.per_frame_duplicate_match_threshold}_obj{args.duplicate_match_threshold}.txt')
+    output_path = Path(args.output_path)
+    save_result_path = output_path.parent / (
+        output_path.stem + 
+        f'_frame_dup_{args.per_frame_duplicate_match_threshold}_obj_dup_{args.duplicate_match_threshold}' +
+        output_path.suffix
+    )
     
     evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=args.visualize)
     
     # Evaluate per scene
     for scene_name in valid_scene_names:
-        if args.back_string:
-            scene_result_path = os.path.join(
-                args.pred_dir, f'{scene_name}_{args.back_string}',
-                f'eval_result_iou{args.iou_threshold}.txt'
-            )
-        else:
-            scene_result_path = os.path.join(
-                args.pred_dir, scene_name,
-                f'eval_result_iou{args.iou_threshold}.txt'
-            )
+        scene_result_path = os.path.join(
+            args.pred_dir, scene_name,
+            f'eval_result.txt'
+        )
         
         evaluate_all_scenes([scene_name], args, scene_result_path, visualize=False)
 
