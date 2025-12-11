@@ -815,7 +815,7 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
             for frame_index, mask in gt_video_1_objects[obj_k].items():
                 frame_index = int(frame_index)
                 if frame_index % resample_rate == 0:
-                    actual_frame_index = frame_index // resample_rate
+                    actual_frame_index = int(frame_index // resample_rate)
                     gt_mask = decode_and_resize_mask(mask, H, W)
                     gt_bbox = mask_to_bbox(gt_mask)
                     
@@ -828,7 +828,7 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
             for frame_index, mask in gt_video_2_objects[obj_k].items():
                 frame_index = int(frame_index)
                 if frame_index % resample_rate == 0:
-                    actual_frame_index = frame_index // resample_rate
+                    actual_frame_index = int(frame_index // resample_rate)
                     gt_mask = decode_and_resize_mask(mask, H, W)
                     gt_bbox = mask_to_bbox(gt_mask)
                     
@@ -1373,7 +1373,7 @@ def main():
                        help='Suffix for prediction directory names')
     
     # Evaluation parameters
-    parser.add_argument('--resample_rate', type=float, default=30,
+    parser.add_argument('--resample_rate', type=int, default=30,
                        help='Frame sampling rate')
     parser.add_argument('--iou_threshold', type=float, default=0.5,
                        help='IoU threshold for matching')
