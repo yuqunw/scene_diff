@@ -25,7 +25,7 @@
   <p align="center">
     <a href='http://yuqunw.github.io/SceneDiff' style='padding-left: 0.5rem;'>
       <img src='https://img.shields.io/badge/Project-Page-blue?style=flat&logo=Google%20chrome&logoColor=blue' alt='Project Page'></a>
-    <a href='#'><img src='https://img.shields.io/badge/arXiv-2409.18964-b31b1b.svg'  alt='Arxiv'></a>
+    <a href='https://arxiv.org/abs/2512.16908'><img src='https://img.shields.io/badge/arXiv-2512.16908-b31b1b.svg'  alt='Arxiv'></a>
     <a href='https://huggingface.co/datasets/yuqun/SceneDiff' style='padding-left: 0.5rem;'>
       <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-yellow?style=flat' alt='Dataset'></a>
     <a href='https://github.com/yuqunw/scenediff_annotator' style='padding-left: 0.5rem;'>
