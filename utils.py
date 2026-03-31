@@ -932,7 +932,7 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
     dinov1_region_match_cost_1 = torch.zeros_like(sam_mask_1_merged).float()
     dinov1_region_match_cost_2 = torch.zeros_like(sam_mask_2_merged).float()
 
-    occlusion_threshold = 0.6
+    occlusion_threshold = 0.5
 
     for mask_idx in sam_mask_1_merged.unique():
         if mask_idx == -1:

@@ -41,9 +41,25 @@
 
 This repository contains the code for the paper [SceneDiff: A Benchmark and Method for Multiview Object Change Detection](http://yuqunw.github.io/SceneDiff). We investigate the problem of identifying objects that have been changed between a pair of captures of the same scene at different times, introducing the first object-level multiview change detection benchmark and a new training-free method.
 
+## Updates
+
+**[Mar 2026]** We update the evaluation protocol and default model parameters:
+
+- **Evaluation criteria.** The previous evaluation used center-point matching for detection–GT correspondence. The evaluation now uses **mask based IoU matching** and reports three metrics:
+  - **px/im IoU** – pixel-level IoU computed on merged masks across all views and frames.
+  - **obj/im AP** – per-frame Average Precision with 0.5 IoU threshold (VOC-style).
+  - **obj/sc AP** – per-scene Average Precision at the object level with 0.5 IoU threshold across all frames, reported in two variants:
+    - *without change-type requirement* – a detection matches any GT object regardless of change type across both sequences.
+    - *with change-type requirement* – a detection must also match the GT change type (moved vs. added/removed).
+- **Default evaluation parameters updated.** `--duplicate_match_threshold` and `--per_frame_duplicate_match_threshold` now default to `1`. 
+
+---
+
+
 ## SceneDiff Benchmark
 
 Download the SceneDiff benchmark dataset from [🤗 Hugging Face](https://huggingface.co/datasets/yuqun/SceneDiff).
+
 ```bash
 mkdir data && cd data
 wget https://huggingface.co/datasets/yuqun/SceneDiff/resolve/main/scenediff_benchmark.zip
@@ -82,7 +98,6 @@ cd data/scenediff_benchmark/vis && pip install -r requirements.txt
 python visualizer.py
 ```
 
-
 ### Evaluation
 We expect the method predictions have following structures:
 ```
@@ -119,13 +134,12 @@ object_masks = {
     }
 }
 ```
+
 Then the evaluation script can be run with:
 
 ```bash
 python scripts/evaluate_multiview.py \
     --pred_dir ${OUTPUT_DIR} \
-    --duplicate_match_threshold 2 \
-    --per_frame_duplicate_match_threshold 2 \
     --splits val \
     --sets varied \
     --output_path ${OUTPUT_FILE_PATH} \
@@ -133,43 +147,44 @@ python scripts/evaluate_multiview.py \
 ```
 
 **Arguments:**
-- `--duplicate_match_threshold`: Tolerance for duplicate objects across frames (default: 2)
-- `--per_frame_duplicate_match_threshold`: Tolerance for duplicate regions per frame (default: 2)
+
+- `--duplicate_match_threshold`: Max number of times a GT object can be matched at the object level (default: 1)
+- `--per_frame_duplicate_match_threshold`: Max number of times a GT region can be matched per frame/view (default: 1)
 - `--splits`: Choose from `val`, `test`, or `all`
 - `--sets`: Choose from `varied`, `kitchen`, or `All`
 - `--visualize`: Set to `True` to save visualization outputs
 
 **Output:** The evaluation results will be saved to `${OUTPUT_FILE_PATH}`
+
 ## Getting Started
 
 ### Installation
 
 1. **Clone this repository with submodules:**
-    ```bash
+  ```bash
     git clone --recursive https://github.com/yuqunw/scene_diff.git
     cd scene_diff
-    ```
-
+  ```
 2. **Create conda environment and install dependencies:**
-    ```bash
+  ```bash
     conda create -n scene_diff python=3.10 -y
     conda activate scene_diff
     pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121 # Install the pytorch fitting your nvcc version 
     pip install -r requirements.txt
     pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu121.html # install torch_scatter
-    ```
-
+  ```
 3. **Install submodules:**
-    ```bash
+  ```bash
     # Install segment-anything submodule
     cd submodules/segment-anything-langsplat-modified
     pip install -e .
     cd ../..
-    ```
+  ```
 
 ### Download Checkpoints
 
 **1. Download the Segment-Anything checkpoint:**
+
 ```bash
 bash checkpoints/download_sam_checkpoint.sh
 ```
@@ -181,13 +196,13 @@ The DINOv3 checkpoint will be automatically downloaded on first use after fillin
 1. Visit the [DINOv3 downloads page](https://ai.meta.com/resources/models-and-libraries/dinov3-downloads/) to apply for the checkpoint access
 2. Right-click on `dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth` and copy the download link
 3. Update the URL in `configs/scenediff_config.yml`:
-   ```yaml
+  ```yaml
    models:
      dinov3:
        weight_url: "<paste_your_copied_url_here>"
-   ```
+  ```
 
-## Quick Demo 
+## Quick Demo
 
 Run change detection on any two videos:
 
@@ -203,8 +218,6 @@ python scripts/demo.py \
 
 **Parameters:** You can modify parameters in `configs/scenediff_config.yml`. If the automatic threshold for change detection doesn't work well (score maps look correct but too many or few detections), you can manually set `detection.object_threshold` in the config file.   
 
-
-
 ## Predict on SceneDiff Benchmark
 
 Run inference on all sequences in the benchmark:
@@ -218,29 +231,13 @@ python scripts/predict_multiview.py \
 ```
 
 **Arguments:**
+
 - `--splits`: Choose from `val`, `test`, or `all`
 - `--sets`: Choose from `varied`, `kitchen`, or `All`
 - `--output_dir`: Directory to save predictions
 - Modify more arguments in the config file
 
 
-
-
-
-
-
-<!-- ## Citation
-
-If you find our work useful in your research, please cite:
-
-```bibtex
-@inproceedings{wu2024scenediff,
-  title={SceneDiff: A Benchmark and Method for Multiview Object Change Detection},
-  author={Wu, Yuqun and Lin, Chih-hao and Che, Henry and Tiwari, Aditi and Zou, Chuhang and Wang, Shenlong and Hoiem, Derek},
-  booktitle={European Conference on Computer Vision (ECCV)},
-  year={2024}
-}
-``` -->
 
 ## Acknowledgement
 

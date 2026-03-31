@@ -2,14 +2,12 @@
 Scene Change Detection Evaluation Metrics
 
 This module computes evaluation metrics for scene change detection:
-- Per-view Average Precision (AP)
-- Type-agnostic object-level AP
-- Type-aware object-level AP
+- Dataset-level IoU across all views and frames
+- Per-frame Average Precision (AP)
+- Per-scene AP without change-type requirement
+- Per-scene AP with change-type requirement
 
-The evaluation uses:
-- Center point matching for detection-GT correspondence
-- VOC-style AP calculation
-- Support for moved/added/removed object classification
+The evaluation uses mask IoU-based correspondence with VOC-style AP.
 """
 
 import os
@@ -78,9 +76,29 @@ def compute_iou(mask1, mask2):
     Returns:
         IoU value (float)
     """
-    intersection = torch.logical_and(mask1, mask2).sum().item()
-    union = torch.logical_or(mask1, mask2).sum().item()
-    return intersection / union if union > 0 else 0
+    if isinstance(mask1, torch.Tensor):
+        mask1 = mask1.cpu().numpy()
+    if isinstance(mask2, torch.Tensor):
+        mask2 = mask2.cpu().numpy()
+
+    mask1 = np.asarray(mask1).astype(bool)
+    mask2 = np.asarray(mask2).astype(bool)
+    intersection = np.logical_and(mask1, mask2).sum()
+    union = np.logical_or(mask1, mask2).sum()
+    return float(intersection / union) if union > 0 else 0.0
+
+
+def decode_and_resize_pred_mask(mask_rle, H, W):
+    """Decode a prediction mask and resize it to the GT resolution."""
+    det_mask = torch.tensor(mask_utils.decode(mask_rle))
+    if det_mask.shape[0] != H or det_mask.shape[1] != W:
+        det_mask = F.interpolate(
+            det_mask.unsqueeze(0).unsqueeze(0).float(),
+            size=(H, W), mode='nearest'
+        ).squeeze(0).squeeze(0) > 0.5
+    else:
+        det_mask = det_mask > 0.5
+    return det_mask.cpu().numpy().astype(bool)
 
 
 # ============================================================================
@@ -192,6 +210,37 @@ def get_mask_bbox_center_point(mask):
     bbox = mask_to_bbox(mask_np)
     
     return (int((bbox[0] + bbox[2]) / 2), int((bbox[1] + bbox[3]) / 2))
+
+
+def get_target_hw_from_gt(gt, max_length):
+    """
+    Build a single target (H, W) from GT aspect ratio and max_length.
+
+    Uses the largest available GT frame size from video1/video2 metadata.
+    """
+    candidate_sizes = []
+    for video_key in ['video1_objects', 'video2_objects']:
+        video_objects = gt.get(video_key, {})
+        for _, frames in video_objects.items():
+            for _, frame_meta in frames.items():
+                size = frame_meta.get('size', None)
+                if size is not None and len(size) >= 2:
+                    # GT stores size as (W, H)
+                    w, h = int(size[0]), int(size[1])
+                    if w > 0 and h > 0:
+                        candidate_sizes.append((w, h))
+                    break
+            if candidate_sizes:
+                break
+
+    if not candidate_sizes:
+        return None
+
+    src_w, src_h = max(candidate_sizes, key=lambda x: x[0] * x[1])
+    scale = float(max_length) / float(max(src_w, src_h))
+    target_w = max(1, int(round(src_w * scale)))
+    target_h = max(1, int(round(src_h * scale)))
+    return target_h, target_w
 
 
 # ============================================================================
@@ -569,10 +618,10 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     """
     Evaluate scene change detection across all scenes.
     
-    Computes three types of Average Precision:
-    1. Per-view AP: Detection accuracy at the frame level
-    2. Type-agnostic object-level AP: Object detection regardless of type
-    3. Type-aware object-level AP: Object detection with type classification
+    Computes three metrics:
+    1. Global IoU across the whole dataset
+    2. Per-frame AP using IoU-based matching (IoU > 0.5)
+    3. Per-scene AP with and without class requirement
     
     Args:
         valid_scene_names: List of scene names to evaluate
@@ -586,6 +635,11 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     all_region_detections_info = []
     all_object_level_detection_info = []
     all_object_level_detection_info_by_label = []
+    
+    # Global IoU tracking
+    global_view_tp = 0.0
+    global_view_fp = 0.0
+    global_view_fn = 0.0
     
     # Process each scene
     for scene_name in valid_scene_names:
@@ -606,7 +660,15 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
             print(f"Error loading scene {scene_name}: {e}")
             continue
         
-        H, W = pred_data.get('H', 480), pred_data.get('W', 640)
+        target_hw = get_target_hw_from_gt(gt_data, args.max_length)
+        if target_hw is not None:
+            H, W = target_hw
+        else:
+            src_h = pred_data.get('H', 1024)
+            src_w = pred_data.get('W', 576)
+            scale = float(args.max_length) / float(max(src_h, src_w))
+            H = max(1, int(round(src_h * scale)))
+            W = max(1, int(round(src_w * scale)))
         
         # Extract ground truth
         scene_gt_objects, scene_gt_labels, scene_gt_objects_by_label = extract_ground_truth(
@@ -618,6 +680,40 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         
         # Extract detections
         scene_region_detections = extract_detections(pred_data, H, W)
+        
+        # Compute global IoU
+        scene_pred_merged_by_view_frame = {'video_1': {}, 'video_2': {}}
+        scene_gt_merged_by_view_frame = {'video_1': {}, 'video_2': {}}
+        
+        for detection in scene_region_detections:
+            video_name = 'video_1' if detection['video'] == 1 else 'video_2'
+            frame_idx = detection['frame_idx']
+            det_mask_np = detection['mask'].cpu().numpy().astype(bool)
+            if frame_idx not in scene_pred_merged_by_view_frame[video_name]:
+                scene_pred_merged_by_view_frame[video_name][frame_idx] = np.zeros((H, W), dtype=bool)
+            scene_pred_merged_by_view_frame[video_name][frame_idx] = np.logical_or(
+                scene_pred_merged_by_view_frame[video_name][frame_idx],
+                det_mask_np
+            )
+        
+        for (_, frame_idx, video), gt_mask in scene_gt_objects.items():
+            video_name = 'video_1' if video == 1 else 'video_2'
+            if frame_idx not in scene_gt_merged_by_view_frame[video_name]:
+                scene_gt_merged_by_view_frame[video_name][frame_idx] = np.zeros((H, W), dtype=bool)
+            scene_gt_merged_by_view_frame[video_name][frame_idx] = np.logical_or(
+                scene_gt_merged_by_view_frame[video_name][frame_idx],
+                np.asarray(gt_mask).astype(bool) if isinstance(gt_mask, torch.Tensor) else gt_mask.astype(bool)
+            )
+        
+        for video_name in ['video_1', 'video_2']:
+            frame_indices = set(scene_pred_merged_by_view_frame[video_name].keys()) | \
+                           set(scene_gt_merged_by_view_frame[video_name].keys())
+            for frame_idx in frame_indices:
+                pred_mask = scene_pred_merged_by_view_frame[video_name].get(frame_idx, np.zeros((H, W), dtype=bool))
+                gt_mask = scene_gt_merged_by_view_frame[video_name].get(frame_idx, np.zeros((H, W), dtype=bool))
+                global_view_tp += float(np.logical_and(pred_mask, gt_mask).sum())
+                global_view_fp += float(np.logical_and(pred_mask, np.logical_not(gt_mask)).sum())
+                global_view_fn += float(np.logical_and(np.logical_not(pred_mask), gt_mask).sum())
         
         pred_data = {k: v for k, v in pred_data.items() if k not in ['H', 'W']}
         # Add labels and confidence to prediction objects
@@ -650,7 +746,7 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
         
         # Object-level evaluation
         evaluate_object_level(
-            pred_data, gt_data, scene_gt_objects, scene_gt_labels,
+            pred_data, scene_gt_objects, scene_gt_labels,
             all_object_level_detection_info,
             all_object_level_detection_info_by_label,
             scene_name, H, W, args
@@ -671,7 +767,8 @@ def evaluate_all_scenes(valid_scene_names, args, save_result_path, visualize=Tru
     metrics = compute_final_metrics(
         all_region_detections_info, total_gt_regions_count,
         all_object_level_detection_info, all_object_level_detection_info_by_label,
-        total_gt_objects_count, valid_scene_names
+        total_gt_objects_count, valid_scene_names,
+        global_view_tp, global_view_fp, global_view_fn
     )
     
     # Print and save results
@@ -694,10 +791,10 @@ def load_scene_data(pred_dir, gt_dir):
 
 def extract_ground_truth(gt_data, H, W, resample_rate):
     """
-    Extract ground truth objects from dataset.
+    Extract ground truth objects from dataset as masks.
     
     Returns:
-        scene_gt_objects: key: (obj_id, frame_idx, video), value: bbox
+        scene_gt_objects: key: (obj_id, frame_idx, video), value: mask
         scene_gt_labels: key: (obj_id, frame_idx, video), value: label
     """
     gt_video_1_objects = gt_data['video1_objects']
@@ -730,10 +827,9 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
                 if frame_index % resample_rate == 0:
                     actual_frame_index = int(frame_index // resample_rate)
                     gt_mask = decode_and_resize_mask(mask, H, W)
-                    gt_bbox = mask_to_bbox(gt_mask)
                     
                     key = (obj_k, actual_frame_index, 1)  # obj_id, frame, video
-                    scene_gt_objects[key] = gt_bbox
+                    scene_gt_objects[key] = gt_mask
                     scene_gt_labels[key] = label
         
         # Process video 2
@@ -743,27 +839,26 @@ def extract_ground_truth(gt_data, H, W, resample_rate):
                 if frame_index % resample_rate == 0:
                     actual_frame_index = int(frame_index // resample_rate)
                     gt_mask = decode_and_resize_mask(mask, H, W)
-                    gt_bbox = mask_to_bbox(gt_mask)
                     
                     key = (obj_k, actual_frame_index, 2)
-                    scene_gt_objects[key] = gt_bbox
+                    scene_gt_objects[key] = gt_mask
                     scene_gt_labels[key] = label
     
     return scene_gt_objects, scene_gt_labels, scene_gt_objects_by_label
 
 
 def decode_and_resize_mask(mask_rle, H, W):
-    """Decode RLE mask and resize to target dimensions."""
+    """Decode RLE mask and resize to target dimensions, return as torch tensor."""
     gt_mask = torch.tensor(mask_utils.decode(mask_rle))
     gt_mask = F.interpolate(
         gt_mask.unsqueeze(0).unsqueeze(0).float(),
         size=(H, W), mode='nearest'
     ).squeeze(0).squeeze(0) > 0.5
-    return gt_mask.cpu().numpy()
+    return gt_mask
 
 
 def extract_detections(pred_data, H, W):
-    """Extract detection list from prediction data."""
+    """Extract detection list from prediction data with resized masks."""
     scene_region_detections = []
     
     for obj_k, obj_v in pred_data.items():
@@ -775,14 +870,19 @@ def extract_detections(pred_data, H, W):
             for frame_index, mask_dict in obj_v['video_1'].items():
                 frame_index = int(frame_index)
                 det_mask = torch.tensor(mask_utils.decode(mask_dict['mask']))
-                det_center = get_mask_bbox_center_point(det_mask)
+                # Resize mask to target dimensions
+                if det_mask.shape[0] != H or det_mask.shape[1] != W:
+                    det_mask = F.interpolate(
+                        det_mask.unsqueeze(0).unsqueeze(0).float(),
+                        size=(H, W),
+                        mode='nearest'
+                    ).squeeze(0).squeeze(0) > 0.5
                 
                 scene_region_detections.append({
                     'obj_id': obj_k,
                     'frame_idx': frame_index,
                     'video': 1,
                     'mask': det_mask,
-                    'pred_center': det_center,
                     'confidence': mask_dict['cost']
                 })
         
@@ -791,14 +891,19 @@ def extract_detections(pred_data, H, W):
             for frame_index, mask_dict in obj_v['video_2'].items():
                 frame_index = int(frame_index)
                 det_mask = torch.tensor(mask_utils.decode(mask_dict['mask']))
-                det_center = get_mask_bbox_center_point(det_mask)
+                # Resize mask to target dimensions
+                if det_mask.shape[0] != H or det_mask.shape[1] != W:
+                    det_mask = F.interpolate(
+                        det_mask.unsqueeze(0).unsqueeze(0).float(),
+                        size=(H, W),
+                        mode='nearest'
+                    ).squeeze(0).squeeze(0) > 0.5
                 
                 scene_region_detections.append({
                     'obj_id': obj_k,
                     'frame_idx': frame_index,
                     'video': 2,
                     'mask': det_mask,
-                    'pred_center': det_center,
                     'confidence': mask_dict['cost']
                 })
     
@@ -808,30 +913,30 @@ def extract_detections(pred_data, H, W):
 
 def match_detections_to_gt(scene_region_detections, scene_gt_objects, scene_gt_labels,
                            scene_gt_matched, all_region_detections_info, scene_name, args):
-    """Match detections to ground truth objects for per-view AP."""
+    """Match detections to ground truth objects for per-view AP using IoU metric."""
     for detection in scene_region_detections:
         frame_idx = detection['frame_idx']
         video = detection['video']
-        det_center = detection['pred_center']
+        det_mask = detection['mask']
         confidence = detection['confidence']
         
-        # Find best matching GT
-        min_distance = np.inf
+        # Find best matching GT using IoU
+        max_iou = 0.0
         best_gt_key = None
         
-        for gt_key, gt_bbox in scene_gt_objects.items():
+        for gt_key, gt_mask in scene_gt_objects.items():
             if gt_key[1] == frame_idx and gt_key[2] == video:
-                matched, distance = center_overlap_detection(det_center, gt_bbox)
-                if matched and distance < min_distance:
-                    min_distance = distance
+                iou = compute_iou(det_mask, gt_mask)
+                if iou > args.iou_threshold and iou > max_iou:
+                    max_iou = iou
                     best_gt_key = gt_key
         
         # Create detection info
         detection_info = {
             'scene_name': scene_name,
             'confidence': confidence,
-            'max_center_distance': min_distance,
-            'center_distance_match': best_gt_key is not None,
+            'max_iou': max_iou,
+            'iou_match': best_gt_key is not None,
             'gt_matched': False,
             'gt_obj_id': None,
             'obj_id': detection['obj_id'],
@@ -850,7 +955,7 @@ def match_detections_to_gt(scene_region_detections, scene_gt_objects, scene_gt_l
                 detection_info['gt_obj_id'] = best_gt_key[0]
                 scene_gt_matched[best_gt_key] = 1
             elif scene_gt_matched[best_gt_key] < args.per_frame_duplicate_match_threshold:
-                # Duplicate within threshold - count as TP but don't add to avoid double counting
+                # Duplicate within threshold - not count as TP but don't add to avoid double counting
                 scene_gt_matched[best_gt_key] += 1
                 detection_info['gt_matched'] = True
                 detection_info['gt_label'] = scene_gt_labels[best_gt_key]
@@ -862,7 +967,7 @@ def match_detections_to_gt(scene_region_detections, scene_gt_objects, scene_gt_l
             all_region_detections_info.append(detection_info)
 
 
-def evaluate_object_level(pred_data, gt_data, scene_gt_objects, scene_gt_labels,
+def evaluate_object_level(pred_data, scene_gt_objects, scene_gt_labels,
                           all_object_level_detection_info,
                           all_object_level_detection_info_by_label,
                           scene_name, H, W, args):
@@ -870,20 +975,33 @@ def evaluate_object_level(pred_data, gt_data, scene_gt_objects, scene_gt_labels,
     # Organize GT objects
     gt_objects = organize_gt_objects(scene_gt_objects, scene_gt_labels)
     
-    # Create duplicate representations for moved objects
-    gt_objects_duplicate = duplicate_moved_objects(gt_objects)
-    pred_objects_duplicate = duplicate_moved_predictions(pred_data)
+    # Prepare prediction objects
+    pred_data_filtered = {k: v for k, v in pred_data.items() 
+                         if k not in ['H', 'W']}
     
-    # Type-agnostic evaluation
+    # Add labels and confidence to prediction objects
+    for obj_k, obj_v in pred_data_filtered.items():
+        if 'video_1' in obj_v and 'video_2' in obj_v:
+            obj_v['label'] = 1  # Moved
+        else:
+            obj_v['label'] = 0  # Non-moved
+        
+        obj_v['confidence'] = compute_object_confidence(obj_v)
+    
+    # Sort by confidence
+    pred_objects_sorted = sorted(pred_data_filtered.items(), 
+                                key=lambda x: x[1]['confidence'], reverse=True)
+    
+    # Type-agnostic evaluation (without class requirement)
     evaluate_class_agnostic(
-        pred_objects_duplicate, gt_objects_duplicate,
-        all_object_level_detection_info, scene_name, args
+        pred_objects_sorted, gt_objects,
+        all_object_level_detection_info, scene_name, args, H, W
     )
     
-    # Type-aware evaluation
+    # Type-aware evaluation (with class requirement)
     evaluate_class_aware(
-        pred_data, gt_objects,
-        all_object_level_detection_info_by_label, scene_name, args
+        pred_data_filtered, gt_objects,
+        all_object_level_detection_info_by_label, scene_name, args, H, W
     )
 
 
@@ -891,7 +1009,7 @@ def organize_gt_objects(scene_gt_objects, scene_gt_labels):
     """Organize ground truth objects by object ID."""
     gt_objects = {}
     
-    for (obj_k, frame_idx, video), gt_bbox in scene_gt_objects.items():
+    for (obj_k, frame_idx, video), gt_mask in scene_gt_objects.items():
         video_name = 'video_1' if video == 1 else 'video_2'
         
         if obj_k not in gt_objects:
@@ -903,60 +1021,9 @@ def organize_gt_objects(scene_gt_objects, scene_gt_labels):
         if video_name not in gt_objects[obj_k]['frames']:
             gt_objects[obj_k]['frames'][video_name] = {}
         
-        gt_objects[obj_k]['frames'][video_name][frame_idx] = gt_bbox
+        gt_objects[obj_k]['frames'][video_name][frame_idx] = gt_mask
     
     return gt_objects
-
-
-def duplicate_moved_objects(gt_objects):
-    """Split moved objects into separate instances for each video."""
-    gt_objects_duplicate = {}
-    max_obj_id = max(gt_objects.keys()) if gt_objects else -1
-    
-    for obj_k, obj_v in gt_objects.items():
-        if obj_v['label'] == 1:  # Moved object
-            # Create two separate objects
-            gt_objects_duplicate[obj_k] = copy.deepcopy(obj_v)
-            del gt_objects_duplicate[obj_k]['frames']['video_2']
-            
-            max_obj_id += 1
-            gt_objects_duplicate[max_obj_id] = copy.deepcopy(obj_v)
-            del gt_objects_duplicate[max_obj_id]['frames']['video_1']
-        else:
-            gt_objects_duplicate[obj_k] = copy.deepcopy(obj_v)
-    
-    return gt_objects_duplicate
-
-
-def duplicate_moved_predictions(pred_data):
-    """Split moved predictions into separate instances for each video."""
-    pred_data_filtered = {k: v for k, v in pred_data.items() 
-                         if k not in ['H', 'W'] and 'label' in v}
-    
-    pred_duplicate = {}
-    max_pred_id = max(pred_data_filtered.keys()) if pred_data_filtered else -1
-    
-    for obj_k, obj_v in pred_data_filtered.items():
-        # Determine label
-        if 'video_1' in obj_v and 'video_2' in obj_v:
-            label = 1  # Moved
-        else:
-            label = 0  # Non-moved
-        
-        obj_v['label'] = label
-        obj_v['confidence'] = compute_object_confidence(obj_v)
-        
-        if label == 1:  # Moved
-            pred_duplicate[obj_k] = copy.deepcopy(obj_v)
-            del pred_duplicate[obj_k]['video_2']
-            
-            max_pred_id += 1
-            pred_duplicate[max_pred_id] = copy.deepcopy(obj_v)
-            del pred_duplicate[max_pred_id]['video_1']
-        else:
-            pred_duplicate[obj_k] = copy.deepcopy(obj_v)
-    
-    return sorted(pred_duplicate.items(), key=lambda x: x[1]['confidence'], reverse=True)
 
 
 def compute_object_confidence(obj_v):
@@ -969,27 +1036,21 @@ def compute_object_confidence(obj_v):
     return np.mean(confidences) if confidences else 0
 
 
-def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_name, args):
-    """Evaluate Type-agnostic object-level AP."""
+def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_name, args, H, W):
+    """Evaluate Type-agnostic object-level AP by stacking both videos' frames."""
     scene_gt_matched = {}
     
     for obj_k, obj_v in pred_objects:
-        # Find best matching frame
-        selected_video, selected_frame, max_conf = find_best_frame(obj_v)
-        if selected_video is None:
-            continue
-        
-        # Match to GT
-        matched_gt_id, min_distance = match_to_gt_object(
-            obj_v, selected_video, selected_frame, gt_objects
+        matched_gt_id, max_global_iou = match_object_to_gt_overall_iou(
+            obj_v, gt_objects, args, H, W
         )
-        
-        # Record detection
+
         detection_info = {
             'scene_name': scene_name,
             'obj_id': obj_k,
             'confidence': obj_v['confidence'],
-            'matched': False
+            'matched': False,
+            'global_iou_over_all_frames': max_global_iou
         }
         
         add_to_list = True
@@ -1006,38 +1067,23 @@ def evaluate_class_agnostic(pred_objects, gt_objects, all_detection_info, scene_
             all_detection_info.append(detection_info)
 
 
-def evaluate_class_aware(pred_objects, gt_objects, all_detection_info, scene_name, args):
-    """Evaluate Type-aware object-level AP."""
+def evaluate_class_aware(pred_objects, gt_objects, all_detection_info, scene_name, args, H, W):
+    """Evaluate Type-aware object-level AP using class matching."""
     scene_gt_matched = {}
 
     pred_sorted = sorted(pred_objects.items(), key=lambda x: x[1]['confidence'], reverse=True)
     
     for obj_k, obj_v in pred_sorted:
-        # Find best frame(s)
-        if obj_v['label'] == 1:  # Moved - need both videos
-            selected_video = 'both'
-            selected_frame_1, selected_frame_2 = find_best_frames_both_videos(obj_v)
-        else:
-            selected_video, selected_frame, _ = find_best_frame(obj_v)
-            if selected_video is None:
-                continue
-        
-        # Match to GT with same label
-        if selected_video == 'both':
-            matched_gt_id = match_moved_object_to_gt(
-                obj_v, selected_frame_1, selected_frame_2, gt_objects
-            )
-        else:
-            matched_gt_id, _ = match_to_gt_object_with_label(
-                obj_v, selected_video, selected_frame, gt_objects, obj_v['label']
-            )
-        
-        # Record detection
+        matched_gt_id, max_global_iou = match_object_to_gt_overall_iou(
+            obj_v, gt_objects, args, H, W, required_label=obj_v.get('label', 0)
+        )
+
         detection_info = {
             'scene_name': scene_name,
             'obj_id': obj_k,
             'confidence': obj_v['confidence'],
-            'matched': False
+            'matched': False,
+            'global_iou_over_all_frames': max_global_iou
         }
         
         add_to_list = True
@@ -1054,165 +1100,99 @@ def evaluate_class_aware(pred_objects, gt_objects, all_detection_info, scene_nam
             all_detection_info.append(detection_info)
 
 
-def find_best_frame(obj_v):
-    """Find frame with highest confidence for an object."""
-    max_conf = 0
-    selected_video = None
-    selected_frame = None
-    
-    for video_key in ['video_1', 'video_2']:
-        if video_key in obj_v:
-            for frame_idx, mask_dict in obj_v[video_key].items():
-                if mask_dict['cost'] > max_conf:
-                    max_conf = mask_dict['cost']
-                    selected_video = video_key
-                    selected_frame = frame_idx
-    
-    return selected_video, selected_frame, max_conf
+def build_pred_masks_by_video(obj_v, H, W):
+    """Convert one predicted object into per-video frame masks."""
+    pred_masks_by_video = {}
+
+    for video_name in ['video_1', 'video_2']:
+        if video_name not in obj_v:
+            continue
+        pred_masks_by_video[video_name] = {}
+        for frame_idx, mask_dict in obj_v[video_name].items():
+            pred_masks_by_video[video_name][int(frame_idx)] = decode_and_resize_pred_mask(
+                mask_dict['mask'], H, W
+            )
+
+    return pred_masks_by_video
 
 
-def find_best_frames_both_videos(obj_v):
-    """Find best frames in both videos for moved object."""
-    best_frame_1 = None
-    best_frame_2 = None
-    max_conf_1 = 0
-    max_conf_2 = 0
-    
-    if 'video_1' in obj_v:
-        for frame_idx, mask_dict in obj_v['video_1'].items():
-            if mask_dict['cost'] > max_conf_1:
-                max_conf_1 = mask_dict['cost']
-                best_frame_1 = frame_idx
-    
-    if 'video_2' in obj_v:
-        for frame_idx, mask_dict in obj_v['video_2'].items():
-            if mask_dict['cost'] > max_conf_2:
-                max_conf_2 = mask_dict['cost']
-                best_frame_2 = frame_idx
-    
-    return best_frame_1, best_frame_2
+def compute_stacked_mask_iou(pred_masks_by_video, gt_obj_v, H, W):
+    """Stack both sequences' frames and compute one IoU value."""
+    total_intersection = 0.0
+    total_union = 0.0
+
+    for video_name in ['video_1', 'video_2']:
+        pred_frames = pred_masks_by_video.get(video_name, {})
+        gt_frames = gt_obj_v['frames'].get(video_name, {})
+        frame_indices = set(pred_frames.keys()) | set(gt_frames.keys())
+
+        for frame_idx in frame_indices:
+            pred_mask = pred_frames.get(frame_idx, np.zeros((H, W), dtype=bool))
+            gt_mask = gt_frames.get(frame_idx, np.zeros((H, W), dtype=bool))
+            total_intersection += float(np.logical_and(pred_mask, gt_mask).sum())
+            total_union += float(np.logical_or(pred_mask, gt_mask).sum())
+
+    return float(total_intersection / total_union) if total_union > 0 else 0.0
 
 
-def match_to_gt_object(obj_v, selected_video, selected_frame, gt_objects):
-    """Match predicted object to ground truth."""
-    min_distance = np.inf
+def match_object_to_gt_overall_iou(obj_v, gt_objects, args, H, W, required_label=None):
+    """Match one predicted object to one GT object using stacked IoU."""
+    pred_masks_by_video = build_pred_masks_by_video(obj_v, H, W)
+    if not pred_masks_by_video:
+        return None, 0.0
+
     matched_gt_id = None
-    
-    det_mask = torch.tensor(mask_utils.decode(obj_v[selected_video][selected_frame]['mask']))
-    det_center = get_mask_bbox_center_point(det_mask)
-    
+    max_global_iou = 0.0
+
     for gt_obj_id, gt_obj_v in gt_objects.items():
-        if selected_video not in gt_obj_v['frames']:
+        if required_label is not None and gt_obj_v['label'] != required_label:
             continue
-        if selected_frame not in gt_obj_v['frames'][selected_video]:
-            continue
-        
-        gt_bbox = gt_obj_v['frames'][selected_video][selected_frame]
-        matched, distance = center_overlap_detection(det_center, gt_bbox)
-        
-        if matched and distance < min_distance:
-            min_distance = distance
+
+        global_iou = compute_stacked_mask_iou(pred_masks_by_video, gt_obj_v, H, W)
+        if global_iou > max_global_iou and global_iou > args.iou_threshold:
+            max_global_iou = global_iou
             matched_gt_id = gt_obj_id
-    
-    return matched_gt_id, min_distance
 
-
-def match_to_gt_object_with_label(obj_v, selected_video, selected_frame, gt_objects, label):
-    """Match predicted object to ground truth with same label."""
-    min_distance = np.inf
-    matched_gt_id = None
-    
-    det_mask = torch.tensor(mask_utils.decode(obj_v[selected_video][selected_frame]['mask']))
-    det_center = get_mask_bbox_center_point(det_mask)
-    
-    for gt_obj_id, gt_obj_v in gt_objects.items():
-        if gt_obj_v['label'] != label:
-            continue
-        if selected_video not in gt_obj_v['frames']:
-            continue
-        if selected_frame not in gt_obj_v['frames'][selected_video]:
-            continue
-        
-        gt_bbox = gt_obj_v['frames'][selected_video][selected_frame]
-        matched, distance = center_overlap_detection(det_center, gt_bbox)
-        
-        if matched and distance < min_distance:
-            min_distance = distance
-            matched_gt_id = gt_obj_id
-    
-    return matched_gt_id, min_distance
-
-
-def match_moved_object_to_gt(obj_v, frame_1, frame_2, gt_objects):
-    """Match moved object to ground truth in both videos."""
-    min_avg_distance = np.inf
-    matched_gt_id = None
-    
-    if frame_1 is None or frame_2 is None:
-        return None
-    
-    det_mask_1 = torch.tensor(mask_utils.decode(obj_v['video_1'][frame_1]['mask']))
-    det_center_1 = get_mask_bbox_center_point(det_mask_1)
-    
-    det_mask_2 = torch.tensor(mask_utils.decode(obj_v['video_2'][frame_2]['mask']))
-    det_center_2 = get_mask_bbox_center_point(det_mask_2)
-    
-    for gt_obj_id, gt_obj_v in gt_objects.items():
-        if gt_obj_v['label'] != 1:  # Must be moved
-            continue
-        
-        if 'video_1' not in gt_obj_v['frames'] or 'video_2' not in gt_obj_v['frames']:
-            continue
-        if frame_1 not in gt_obj_v['frames']['video_1'] or frame_2 not in gt_obj_v['frames']['video_2']:
-            continue
-        
-        gt_bbox_1 = gt_obj_v['frames']['video_1'][frame_1]
-        gt_bbox_2 = gt_obj_v['frames']['video_2'][frame_2]
-        
-        matched_1, dist_1 = center_overlap_detection(det_center_1, gt_bbox_1)
-        matched_2, dist_2 = center_overlap_detection(det_center_2, gt_bbox_2)
-        
-        if matched_1 and matched_2:
-            avg_distance = (dist_1 + dist_2) / 2
-            if avg_distance < min_avg_distance:
-                min_avg_distance = avg_distance
-                matched_gt_id = gt_obj_id
-    
-    return matched_gt_id
+    return matched_gt_id, max_global_iou
 
 
 def compute_final_metrics(all_region_detections_info, total_gt_regions_count,
                          all_object_level_detection_info,
                          all_object_level_detection_info_by_label,
-                         total_gt_objects_count, valid_scene_names):
-    """Compute final AP metrics."""
-    # Per-view AP
+                         total_gt_objects_count, valid_scene_names,
+                         global_view_tp, global_view_fp, global_view_fn):
+    """Compute final metrics: global IoU, per-frame AP, and per-scene AP."""
+    
+    # Metric 1: Global IoU across all frames and views
+    global_view_union = global_view_tp + global_view_fp + global_view_fn
+    global_iou = float(global_view_tp / global_view_union) if global_view_union > 0 else 0.0
+    
+    # Metric 2: Per-frame AP using IoU-based matching
     all_region_detections_info = sorted(all_region_detections_info, key=lambda x: x['confidence'], reverse=True)
     tp = np.array([1 if d['gt_matched'] else 0 for d in all_region_detections_info])
     fp = np.array([0 if d['gt_matched'] else 1 for d in all_region_detections_info])
     
-    tp_cumsum = np.cumsum(tp)
-    fp_cumsum = np.cumsum(fp)
+    tp_cumsum = np.cumsum(tp) if len(tp) > 0 else np.array([])
+    fp_cumsum = np.cumsum(fp) if len(fp) > 0 else np.array([])
     recalls = tp_cumsum / total_gt_regions_count if total_gt_regions_count > 0 else np.zeros_like(tp_cumsum)
     precisions = tp_cumsum / (tp_cumsum + fp_cumsum) if len(tp_cumsum) > 0 else np.zeros_like(tp_cumsum)
-    per_view_ap = calculate_voc_ap(recalls, precisions)
+    per_frame_ap = calculate_voc_ap(recalls, precisions)
     
-    # Type-agnostic object-level AP
+    # Metric 3a: Per-scene AP without class requirement (type-agnostic)
     all_object_level_detection_info = sorted(all_object_level_detection_info, 
                                              key=lambda x: x['confidence'], reverse=True)
     tp_obj = np.array([1 if d['matched'] else 0 for d in all_object_level_detection_info])
     fp_obj = np.array([0 if d['matched'] else 1 for d in all_object_level_detection_info])
     
     total_gt_objects_all = sum(sum(total_gt_objects_count[s].values()) for s in valid_scene_names)
-    total_gt_objects_all += sum(total_gt_objects_count[s][1] for s in valid_scene_names)  # Moved counted twice
     
-    tp_obj_cumsum = np.cumsum(tp_obj)
-    fp_obj_cumsum = np.cumsum(fp_obj)
+    tp_obj_cumsum = np.cumsum(tp_obj) if len(tp_obj) > 0 else np.array([])
+    fp_obj_cumsum = np.cumsum(fp_obj) if len(fp_obj) > 0 else np.array([])
     recalls_obj = tp_obj_cumsum / total_gt_objects_all if total_gt_objects_all > 0 else np.zeros_like(tp_obj_cumsum)
     precisions_obj = tp_obj_cumsum / (tp_obj_cumsum + fp_obj_cumsum) if len(tp_obj_cumsum) > 0 else np.zeros_like(tp_obj_cumsum)
-    class_agnostic_ap = calculate_voc_ap(recalls_obj, precisions_obj)
+    per_scene_ap_without_class = calculate_voc_ap(recalls_obj, precisions_obj)
     
-    # Type-aware object-level AP
+    # Metric 3b: Per-scene AP with class requirement (type-aware)
     all_object_level_detection_info_by_label = sorted(all_object_level_detection_info_by_label,
                                                       key=lambda x: x['confidence'], reverse=True)
     tp_label = np.array([1 if d['matched'] else 0 for d in all_object_level_detection_info_by_label])
@@ -1220,19 +1200,23 @@ def compute_final_metrics(all_region_detections_info, total_gt_regions_count,
     
     total_gt_objects_by_label = sum(sum(total_gt_objects_count[s].values()) for s in valid_scene_names)
     
-    tp_label_cumsum = np.cumsum(tp_label)
-    fp_label_cumsum = np.cumsum(fp_label)
+    tp_label_cumsum = np.cumsum(tp_label) if len(tp_label) > 0 else np.array([])
+    fp_label_cumsum = np.cumsum(fp_label) if len(fp_label) > 0 else np.array([])
     recalls_label = tp_label_cumsum / total_gt_objects_by_label if total_gt_objects_by_label > 0 else np.zeros_like(tp_label_cumsum)
     precisions_label = tp_label_cumsum / (tp_label_cumsum + fp_label_cumsum) if len(tp_label_cumsum) > 0 else np.zeros_like(tp_label_cumsum)
-    class_aware_ap = calculate_voc_ap(recalls_label, precisions_label)
+    per_scene_ap_with_class = calculate_voc_ap(recalls_label, precisions_label)
     
     return {
-        'per_view_ap': per_view_ap,
-        'class_agnostic_ap': class_agnostic_ap,
-        'class_aware_ap': class_aware_ap,
-        'tp_obj': tp_obj_cumsum[-1] if len(tp_obj_cumsum) > 0 else 0,
-        'fp_obj': fp_obj_cumsum[-1] if len(fp_obj_cumsum) > 0 else 0,
-        'fn_obj': total_gt_objects_all - (tp_obj_cumsum[-1] if len(tp_obj_cumsum) > 0 else 0)
+        'global_iou': global_iou,
+        'per_frame_ap': per_frame_ap,
+        'per_scene_ap_without_class': per_scene_ap_without_class,
+        'per_scene_ap_with_class': per_scene_ap_with_class,
+        'tp': tp_obj_cumsum[-1] if len(tp_obj_cumsum) > 0 else 0,
+        'fp': fp_obj_cumsum[-1] if len(fp_obj_cumsum) > 0 else 0,
+        'fn': total_gt_objects_all - (tp_obj_cumsum[-1] if len(tp_obj_cumsum) > 0 else 0),
+        'global_view_tp': global_view_tp,
+        'global_view_fp': global_view_fp,
+        'global_view_fn': global_view_fn
     }
 
 
@@ -1242,22 +1226,44 @@ def print_and_save_results(metrics, save_path, valid_scene_names, args):
     print("EVALUATION RESULTS")
     print("="*80)
     print(f"Number of scenes: {len(valid_scene_names)}")
-    print(f"\nPer-view AP: {metrics['per_view_ap']:.4f}")
-    print(f"Type-agnostic object AP: {metrics['class_agnostic_ap']:.4f}")
-    print(f"Type-aware object AP: {metrics['class_aware_ap']:.4f}")
-    print(f"\nTrue Positives: {metrics['tp_obj']:.0f}")
-    print(f"False Positives: {metrics['fp_obj']:.0f}")
-    print(f"False Negatives: {metrics['fn_obj']:.0f}")
+    print(f"IoU threshold: {args.iou_threshold}\n")
+    
+    # Metric 1: Global IoU
+    print(f"Metric 1: px/im IoU (merged masks, all views): {metrics['global_iou']:.4f}")
+    print(f"  TP: {metrics['global_view_tp']:.0f}, FP: {metrics['global_view_fp']:.0f}, FN: {metrics['global_view_fn']:.0f}\n")
+    
+    # Metric 2: Per-frame AP
+    print(f"Metric 2: obj/im AP (IoU-based matching): {metrics['per_frame_ap']:.4f}\n")
+    
+    # Metric 3: Per-scene AP
+    print(f"Metric 3a: obj/sc AP (without class requirement): {metrics['per_scene_ap_without_class']:.4f}")
+    print(f"Metric 3b: obj/sc AP (with class requirement): {metrics['per_scene_ap_with_class']:.4f}")
+    
+    print(f"\nDetection Statistics:")
+    print(f"  True Positives: {metrics['tp']:.0f}")
+    print(f"  False Positives: {metrics['fp']:.0f}")
+    print(f"  False Negatives: {metrics['fn']:.0f}")
     print("="*80 + "\n")
     
     # Save to file
     with open(save_path, 'w') as f:
         f.write(f"Scenes: {len(valid_scene_names)}\n")
         f.write(f"Duplicate match threshold: {args.duplicate_match_threshold}\n")
-        f.write(f"Per-frame duplicate threshold: {args.per_frame_duplicate_match_threshold}\n\n")
-        f.write(f"Per-view AP: {metrics['per_view_ap']:.4f}\n")
-        f.write(f"Type-agnostic object AP: {metrics['class_agnostic_ap']:.4f}\n")
-        f.write(f"Type-aware object AP: {metrics['class_aware_ap']:.4f}\n")
+        f.write(f"Per-frame duplicate threshold: {args.per_frame_duplicate_match_threshold}\n")
+        f.write(f"IoU threshold: {args.iou_threshold}\n\n")
+        
+        f.write(f"Metric 1: px/im IoU (merged masks, all views): {metrics['global_iou']:.4f}\n")
+        f.write(f"  TP: {metrics['global_view_tp']:.0f}, FP: {metrics['global_view_fp']:.0f}, FN: {metrics['global_view_fn']:.0f}\n\n")
+        
+        f.write(f"Metric 2: obj/im AP (IoU-based matching): {metrics['per_frame_ap']:.4f}\n\n")
+        
+        f.write(f"Metric 3a: obj/sc AP (without class requirement): {metrics['per_scene_ap_without_class']:.4f}\n")
+        f.write(f"Metric 3b: obj/sc AP (with class requirement): {metrics['per_scene_ap_with_class']:.4f}\n\n")
+        
+        f.write(f"Detection Statistics:\n")
+        f.write(f"  True Positives: {metrics['tp']:.0f}\n")
+        f.write(f"  False Positives: {metrics['fp']:.0f}\n")
+        f.write(f"  False Negatives: {metrics['fn']:.0f}\n")
 
 
 # ============================================================================
@@ -1286,6 +1292,10 @@ def main():
     # Evaluation parameters
     parser.add_argument('--resample_rate', type=int, default=30,
                        help='Frame sampling rate')
+    parser.add_argument('--max_length', type=int, default=1024,
+                       help='Longest image side used when resizing GT-derived target resolution')
+    parser.add_argument('--iou_threshold', type=float, default=0.5,
+                       help='IoU threshold for IoU-based matching')
     parser.add_argument('--duplicate_match_threshold', type=int, default=1,
                        help='Max matches per GT object (object-level)')
     parser.add_argument('--per_frame_duplicate_match_threshold', type=int, default=1,
@@ -1342,6 +1352,7 @@ def main():
     
     # Evaluate all scenes
     output_path = Path(args.output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     save_result_path = output_path.parent / (
         output_path.stem + 
         f'_frame_dup_{args.per_frame_duplicate_match_threshold}_obj_dup_{args.duplicate_match_threshold}' +
@@ -1357,7 +1368,7 @@ def main():
             f'eval_result.txt'
         )
         
-        evaluate_all_scenes([scene_name], args, scene_result_path, visualize=False)
+    #     evaluate_all_scenes([scene_name], args, scene_result_path, visualize=False)
 
 
 if __name__ == "__main__":

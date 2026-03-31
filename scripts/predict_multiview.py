@@ -12,8 +12,10 @@ import os
 import sys
 import json
 import argparse
+import random
 from pathlib import Path
 
+import numpy as np
 import yaml
 import torch
 
@@ -23,6 +25,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Import after paths are set
 from modules import SceneDiff
 from utils import process_video_to_frames
+
+
+def set_random_seed(seed):
+    """Set random seed across Python, NumPy, and PyTorch for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 def load_config(config_path):
@@ -211,6 +227,12 @@ def main():
         default='configs/scenediff_config.yml',
         help='Path to configuration file'
     )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Random seed for reproducible runs'
+    )    
     
     # Dataset selection
     parser.add_argument(
@@ -256,6 +278,10 @@ def main():
     
     args = parser.parse_args()
     
+    if args.seed is not None:
+        set_random_seed(args.seed)
+        print(f"Set random seed: {args.seed}")
+
     # Load configuration
     config = load_config(args.config)
     print(f"Loaded configuration from: {args.config}")
