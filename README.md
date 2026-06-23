@@ -1,9 +1,8 @@
 <br />
 <p align="center">
   <h1 align="center">SceneDiff: A Benchmark and Method for Multiview Object Change Detection</h1>
+  <h3 align="center">ECCV 2026</h3>
   <p align="center">
-    <h3 align="center">ECCV 2026</h3>
-    <br />
    <a href="http://yuqunw.github.io"><strong>Yuqun Wu</strong></a>
     ·
     <a href="https://chih-hao-lin.github.io"><strong>Chih-hao Lin</strong></a>
