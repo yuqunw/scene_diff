@@ -1,8 +1,6 @@
 <br />
 <p align="center">
-
   <h1 align="center">SceneDiff: A Benchmark and Method for Multiview Object Change Detection</h1>
-
   <p align="center">
     <h3 align="center">ECCV 2026</h3>
     <br />
@@ -21,8 +19,6 @@
     <a href="http://dhoiem.cs.illinois.edu"><strong>Derek Hoiem</strong></a>
   </p>
 </p>
-
-
   <p align="center">
     <a href='http://yuqunw.github.io/SceneDiff' style='padding-left: 0.5rem;'>
       <img src='https://img.shields.io/badge/Project-Page-blue?style=flat&logo=Google%20chrome&logoColor=blue' alt='Project Page'></a>
@@ -32,12 +28,10 @@
     <a href='https://github.com/yuqunw/scenediff_annotator' style='padding-left: 0.5rem;'>
       <img src='https://img.shields.io/badge/GitHub-Data%20Annotator-black?style=flat&logo=github&logoColor=white' alt='Data Annotator'></a>
   </p>
-
 </p>
 <p align="center"> 
 <img src="assets/teaser.png"/>
 </p>
-
 <br />
 
 This repository contains the code for the paper [SceneDiff: A Benchmark and Method for Multiview Object Change Detection](http://yuqunw.github.io/SceneDiff). We investigate the problem of identifying objects that have been changed between a pair of captures of the same scene at different times, introducing the first object-level multiview change detection benchmark and a new training-free method.
