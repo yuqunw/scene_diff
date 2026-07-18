@@ -240,6 +240,27 @@ We thank the great work from these repositories:
 * [Pi3](https://github.com/yyfz/Pi3) for geometry estimation 
 * [DINOv3](https://github.com/facebookresearch/dinov3) for appearance feature extraction
 
+
+## Citation
+If you find this method helpful for your research, please consider citing the following BibTeX entry.
+```BibTex
+@article{wu2025scenediff,
+  title={SceneDiff: A Benchmark and Method for Multiview Object Change Detection},
+  author={Wu, Yuqun and Lin, Chih-hao and Che, Henry and Tiwari, Aditi and Zou, Chuhang and Wang, Shenlong and Hoiem, Derek},
+  journal={arXiv preprint arXiv:2512.16908},
+  year={2025}
+}
+```
+If you find the dataset helpful for your research, please consider citing the following BibTeX entry in addition to SceneDiff.
+```BibTex
+@inproceedings{perrett2025hd,
+  title={Hd-epic: A highly-detailed egocentric video dataset},
+  author={Perrett, Toby and Darkhalil, Ahmad and Sinha, Saptarshi and Emara, Omar and Pollard, Sam and Parida, Kranti Kumar and Liu, Kaiting and Gatti, Prajwal and Bansal, Siddhant and Flanagan, Kevin and others},
+  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
+  pages={23901--23913},
+  year={2025}
+}
+
 ## License
 
 This project is released under the MIT License. See [LICENSE](LICENSE) for details.
