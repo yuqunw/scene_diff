@@ -3,19 +3,25 @@
   <h1 align="center">SceneDiff: A Benchmark and Method for Multiview Object Change Detection</h1>
   <h3 align="center">ECCV 2026</h3>
   <p align="center">
-   <a href="http://yuqunw.github.io"><strong>Yuqun Wu</strong></a>
+   <a href="http://yuqunw.github.io"><strong>Yuqun Wu</strong></a><sup>1</sup>
     ·
-    <a href="https://chih-hao-lin.github.io"><strong>Chih-hao Lin</strong></a>
+    <a href="https://chih-hao-lin.github.io"><strong>Chih-hao Lin</strong></a><sup>1</sup>
     ·
-    <a href="https://hungdche.github.io"><strong>Henry Che</strong></a>
+    <a href="https://hungdche.github.io"><strong>Henry Che</strong></a><sup>1</sup>
     ·
-    <a href="https://adititiwari19.github.io"><strong>Aditi Tiwari</strong></a>
+    <a href="https://adititiwari19.github.io"><strong>Aditi Tiwari</strong></a><sup>1</sup>
+    <br>
+    <a href="https://zouchuhang.github.io"><strong>Chuhang Zou</strong></a><sup>2†</sup>
     ·
-    <a href="https://zouchuhang.github.io"><strong>Chuhang Zou</strong></a>
+    <a href="https://shenlong.web.illinois.edu"><strong>Shenlong Wang</strong></a><sup>1†</sup>
     ·
-    <a href="https://shenlong.web.illinois.edu"><strong>Shenlong Wang</strong></a>
-    ·
-    <a href="http://dhoiem.cs.illinois.edu"><strong>Derek Hoiem</strong></a>
+    <a href="http://dhoiem.cs.illinois.edu"><strong>Derek Hoiem</strong></a><sup>1†</sup>
+  </p>
+  <p align="center">
+    <sup>1</sup>University of Illinois at Urbana-Champaign &nbsp;&nbsp; <sup>2</sup>Meta
+  </p>
+  <p align="center">
+    <sup>†</sup>Corresponding authors
   </p>
 </p>
   <p align="center">
