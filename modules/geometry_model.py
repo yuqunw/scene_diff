@@ -37,6 +37,10 @@ class GeometryModel:
         self.config = config
         self.device = device
         self.model = None
+        self.scene_center = None
+        self.scene_scale = None
+        self.scene_cube_radius = None
+        self.scene_cube_radius_scaled = None
 
 
     def _load_pi3_model(self):
@@ -55,7 +59,7 @@ class GeometryModel:
         self.depth_edge_fn = depth_edge
         
         model_name = self.config['models']['pi3']['name']
-        self.model = Pi3.from_pretrained(model_name).to(self.device).eval()
+        self.model = Pi3.from_pretrained(model_name, local_files_only=True).to(self.device).eval()
         print(f"[GeometryModel] Loaded Pi3 model: {model_name}")
     
     def estimate_depth_and_poses(self, images):
@@ -120,7 +124,7 @@ class GeometryModel:
     
     def normalize_scene_scale(self, point_map, depth_map, poses):
         """
-        Normalize scene scale using voxel size estimation.
+        Normalize scene with camera-center anchoring and bounded cube.
         
         Args:
             point_map: Point cloud (N, H, W, 3)
@@ -132,18 +136,40 @@ class GeometryModel:
         """
         subsample_size = self.config['processing']['subsample_size']
         total_voxel_number = self.config['processing']['total_voxel_number']
-        
+
+        # 1) Put world center at mean camera center.
+        camera_centers = poses[:, :, :3, 3]  # (B, N, 3)
+        scene_center = camera_centers.mean(dim=1, keepdim=True)  # (B, 1, 3)
+        centered_camera_centers = camera_centers - scene_center
+        centered_points = point_map - scene_center[0, 0].detach().cpu().numpy()
+
+        # 2) Cube half-size capped by farthest camera-center distance * 2.
+        pose_radius = torch.norm(centered_camera_centers, dim=-1).max().item()
+        cube_radius = max(pose_radius * 3.0, 1e-6)
+
+        # Use only in-cube points for robust voxel size estimation.
+        in_cube = np.all(np.abs(centered_points) <= cube_radius, axis=-1)
+        points_for_voxel = centered_points[in_cube]
+        if points_for_voxel.size == 0:
+            points_for_voxel = centered_points.reshape(-1, 3)
+
         voxel_size = get_robust_voxel_size(
-            point_map.reshape(-1, 3),
+            points_for_voxel,
             subsample_size=subsample_size,
             scale_factor=total_voxel_number
         )
         scale = 1 / (voxel_size * total_voxel_number)
-        
+
         depth_scaled = depth_map * scale
-        points_scaled = point_map * scale
+        points_scaled = centered_points * scale
         poses_scaled = poses.clone()
-        poses_scaled[:, :, :3, 3] = poses_scaled[:, :, :3, 3] * scale
+        poses_scaled[:, :, :3, 3] = (poses_scaled[:, :, :3, 3] - scene_center) * scale
+
+        # Store normalization metadata for later filtering during voxelization.
+        self.scene_center = scene_center
+        self.scene_scale = scale
+        self.scene_cube_radius = cube_radius
+        self.scene_cube_radius_scaled = cube_radius * scale
         
         return depth_scaled, points_scaled, poses_scaled, voxel_size
     

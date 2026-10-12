@@ -886,7 +886,8 @@ def compute_scale_and_shift(prediction, target, mask):
 
 
 def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged, 
-                                 sam_mask_2_merged, valid_mask_1, valid_mask_2):
+                                 sam_mask_2_merged, valid_mask_1, valid_mask_2,
+                                 occlusion_threshold=0.5):
     """
     Compute region matching cost using DINO features.
     
@@ -897,6 +898,7 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
         sam_mask_2_merged: Segmentation mask for image 2 (H, W)
         valid_mask_1: Valid mask for image 1 (H, W)
         valid_mask_2: Valid mask for image 2 (H, W)
+        occlusion_threshold: Skip regions whose occluded fraction exceeds this
 
     Returns:
         Tuple of (cost_1, cost_2, match_indices_1, match_indices_2, sim_1, sim_2)
@@ -931,8 +933,6 @@ def get_dino_matched_region_cost(dinov1_feat_1, dinov1_feat_2, sam_mask_1_merged
 
     dinov1_region_match_cost_1 = torch.zeros_like(sam_mask_1_merged).float()
     dinov1_region_match_cost_2 = torch.zeros_like(sam_mask_2_merged).float()
-
-    occlusion_threshold = 0.5
 
     for mask_idx in sam_mask_1_merged.unique():
         if mask_idx == -1:

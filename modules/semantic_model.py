@@ -9,6 +9,7 @@ import os
 import torch
 import torch.nn.functional as F
 import numpy as np
+from PIL import Image
 
 from utils import (
     predict_dinov3_feat,
@@ -42,13 +43,15 @@ class SemanticModel:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         dinov3_path = os.path.join(project_root, 'submodules/dinov3')
         model_name = dinov3_config['model_name']
-        weight_url = dinov3_config['weight_url']
-        
+        # Use the configured weights when given; otherwise torch hub's default for this model.
+        weight_url = dinov3_config.get('weight_url')
+        hub_kwargs = {'weights': weight_url} if weight_url else {}
+
         self.model = torch.hub.load(
             dinov3_path,
             model_name,
             source='local',
-            weights=weight_url
+            **hub_kwargs
         ).to(self.device).eval()
         
         print(f"[SemanticModel] Loaded DINOv3 model: {model_name}")
@@ -64,6 +67,34 @@ class SemanticModel:
             Feature map (C, H, W)
         """
         return predict_dinov3_feat(image_np, self.model)
+
+    def extract_features_from_path_2x(self, image_path, target_h, target_w, scale=2):
+        """
+        Extract DINOv3 features from an image loaded from disk at higher resolution,
+        then resize features back to target size.
+
+        Args:
+            image_path: Path to image
+            target_h, target_w: Output feature spatial size
+            scale: Upsample factor applied at image-loading stage
+
+        Returns:
+            Feature map (C, target_h, target_w)
+        """
+        up_h = max(1, int(target_h * scale))
+        up_w = max(1, int(target_w * scale))
+
+        img_np = np.array(
+            Image.open(image_path).convert('RGB').resize((up_w, up_h), Image.Resampling.LANCZOS)
+        )
+        feat_up = predict_dinov3_feat(img_np, self.model)
+        feat = F.interpolate(
+            feat_up.unsqueeze(0),
+            size=(target_h, target_w),
+            mode='bilinear',
+            align_corners=False
+        )[0]
+        return feat
     
     def extract_features_batch(self, images_np_list):
         """

@@ -41,6 +41,18 @@ def set_random_seed(seed):
     torch.use_deterministic_algorithms(True, warn_only=True)
 
 
+def str2bool(v):
+    """Parse common bool strings for argparse."""
+    if isinstance(v, bool):
+        return v
+    val = str(v).strip().lower()
+    if val in {"true", "1", "yes", "y", "on"}:
+        return True
+    if val in {"false", "0", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {v}")
+
+
 def load_config(config_path):
     """
     Load configuration from YAML file.
@@ -259,21 +271,39 @@ def main():
     )
     parser.add_argument(
         '--use_cache',
-        type=eval,
-        default=False,
+        type=str2bool,
+        default=None,
         help='Override use_cache from config'
     )
     parser.add_argument(
         '--save_cache',
-        type=eval,
-        default=False,
+        type=str2bool,
+        default=None,
         help='Override save_cache from config'
     )
     parser.add_argument(
         '--vis_pc',
-        type=eval,
-        default=False,
+        type=str2bool,
+        default=None,
         help='Override vis_pc from config'
+    )
+    parser.add_argument(
+        '--max_size',
+        type=int,
+        default=None,
+        help='Override processing.max_size from config'
+    )
+    parser.add_argument(
+        '--filter_percentage_before_threshold',
+        type=float,
+        default=None,
+        help='Override detection.filter_percentage_before_threshold from config'
+    )
+    parser.add_argument(
+        '--lambda_dino_region_match',
+        type=float,
+        default=None,
+        help='Override costs.lambda_dino_region_match from config'
     )
     
     args = parser.parse_args()
@@ -295,6 +325,12 @@ def main():
         config['cache']['save_cache'] = args.save_cache
     if args.vis_pc is not None:
         config['visualization']['vis_pc'] = args.vis_pc
+    if args.max_size is not None:
+        config['processing']['max_size'] = args.max_size
+    if args.filter_percentage_before_threshold is not None:
+        config['detection']['filter_percentage_before_threshold'] = args.filter_percentage_before_threshold
+    if args.lambda_dino_region_match is not None:
+        config['costs']['lambda_dino_region_match'] = args.lambda_dino_region_match
     
     # Determine scenes to process
     valid_scenes = get_scenes_to_process(config, args)

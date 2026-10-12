@@ -39,11 +39,13 @@ class ConfigManager:
             'subsample_size': 1000000,
             'total_voxel_number': 200,
             'occlusion_threshold': -0.02,
+            'max_size': 518,
         },
         'costs': {
             'lambda_geo': 1.0,
             'lambda_dino': 0.3,
             'lambda_dino_region_match': 0.1,
+            'region_match_occlusion_threshold': 0.5,
         },
         'detection': {
             'min_detection_pixel': 100,
@@ -207,6 +209,8 @@ class ConfigManager:
         # Validate processing parameters
         if self.get('processing.visible_percentage') <= 0 or self.get('processing.visible_percentage') > 1:
             errors.append("processing.visible_percentage must be in (0, 1]")
+        if self.get('processing.max_size') < 1:
+            errors.append("processing.max_size must be >= 1")
         
         # Validate cost weights
         for key in ['lambda_geo', 'lambda_dino', 'lambda_dino_region_match']:

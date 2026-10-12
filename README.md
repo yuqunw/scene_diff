@@ -237,6 +237,10 @@ python scripts/predict_multiview.py \
 - `--output_dir`: Directory to save predictions
 - Modify more arguments in the config file
 
+## Results on PASLCD
+
+To reproduce our results on the PASLCD dataset, including the precomputed SAM masks we used, see [PASLCD.md](PASLCD.md).
+
 
 
 ## Acknowledgement
