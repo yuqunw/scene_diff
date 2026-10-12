@@ -25,7 +25,7 @@ It also accepts a local path to `dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pt
    at `data/PASLCD`, so that each scene instance is `data/PASLCD/<Scene>/<Instance>/` containing
    `images/` and `gt_mask/`. Reference views are the images without `test` in their file name;
    query views contain `test`.
-2. Download the SAM masks (`PASLCD_masks.tar.gz`, ~50 MB) from **<MASKS_URL>** and extract them
+2. Download the SAM masks (`PASLCD_masks.tar.gz`, ~50 MB) from **[MASKS_URL](https://drive.google.com/file/d/1k2soUDEqEzeCNhqa_bFxFwlFUYKgq6Mx/view?usp=drive_link)** and extract them
    into the same folder:
 
    ```bash
